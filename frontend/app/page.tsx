@@ -396,7 +396,7 @@ export default function DashboardPage() {
       const results: string[] = [];
       for (const c of toCall) {
         const normalized = normalizePhoneNumber(c.phone);
-        const createRes = await fetch(`${API_BASE_URL}/api/customers`, {
+        const createRes = await fetch(`/api/proxy/customers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: c.name, phone: normalized }),
@@ -412,7 +412,7 @@ export default function DashboardPage() {
           results.push(`${c.name}: missing id from customer response`);
           continue;
         }
-        const callRes = await fetch(`${API_BASE_URL}/api/calls/${id}`, { method: 'POST' });
+        const callRes = await fetch(`/api/proxy/calls/${id}`, { method: 'POST' });
         if (!callRes.ok) {
           const errText = await callRes.text();
           results.push(`${c.name}: call failed (${errText})`);
