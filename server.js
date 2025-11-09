@@ -10,6 +10,7 @@ import { startTrendsCron } from './trendsCron.js';
 import { startRedditCron } from './redditCron.js';
 import callRoutes from './routes/callRoutes.js';
 import twilioRoutes from './routes/twilioRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 // ES Module fix for __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -51,7 +52,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/api/calls', callRoutes);
 app.use('/api/twilio', twilioRoutes);
 app.use('/api/sentiments', sentimentRoutes);
-
+app.use('/api/dashboard', dashboardRoutes);
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
