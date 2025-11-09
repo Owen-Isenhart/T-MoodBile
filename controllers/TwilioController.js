@@ -51,7 +51,6 @@ async function handleRecordingWebhook(req, res) {
       return res.status(400).json({ error: 'No RecordingUrl provided.' });
     }
 
-    // Find which customer this call belonged to
     const callLog = await CallLog.findBySid(CallSid);
     if (!callLog) {
       console.error(`Could not find CallLog for CallSid: ${CallSid}`);
@@ -59,18 +58,28 @@ async function handleRecordingWebhook(req, res) {
     }
     const customerId = callLog.customer_id;
 
-    // Transcribe the audio
+    // --- Step 1: Transcribe the audio ---
     const transcript = await transcriptionService.transcribeAudio(RecordingUrl);
     if (!transcript) {
       console.log(`Empty transcript for CallSid: ${CallSid}`);
       return res.sendStatus(200); // Acknowledge webhook
     }
 
-    // Analyze sentiment with Gemini
+    // --- Step 2: Analyze sentiment ---
     const sentiment = await transcriptionService.analyzeSentiment(transcript);
 
-    // Save to DB
-    await SurveyResponse.create(customerId, transcript, sentiment);
+    // --- Step 3 (NEW): Generate insights if needed ---
+    let insight = null; // Default to null (for 'good' sentiment)
+
+    if (sentiment === 'bad' || sentiment === 'neutral') {
+      console.log(`Sentiment is ${sentiment}, generating improvement insight...`);
+      insight = await transcriptionService.generateImprovementInsight(transcript, sentiment);
+    } else {
+      console.log("Sentiment is 'good', no insight needed.");
+    }
+
+    // --- Step 4 (Updated): Save everything to DB ---
+    await SurveyResponse.create(customerId, transcript, sentiment, insight);
 
     res.sendStatus(200); // Success!
   } catch (err) {

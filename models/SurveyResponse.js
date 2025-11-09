@@ -1,10 +1,13 @@
 import sql from '../db.js';
 
 class SurveyResponse {
-  static async create(customerId, transcript, sentiment) {
+  static async create(customerId, transcript, sentiment, insight) {
     const [response] = await sql`
-      INSERT INTO survey_responses (customer_id, transcript, sentiment)
-      VALUES (${customerId}, ${transcript}, ${sentiment}) RETURNING *
+      INSERT INTO survey_responses 
+        (customer_id, transcript, sentiment, insight)
+      VALUES 
+        (${customerId}, ${transcript}, ${sentiment}, ${insight}) 
+      RETURNING *
     `;
     return response;
   }
