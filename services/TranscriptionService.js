@@ -61,6 +61,22 @@ class TranscriptionService {
     console.log(`Sentiment: ${sentiment}`);
     return sentiment || 'neutral';
   }
+
+  async generateImprovementInsight(text, sentiment) {
+    // This prompt is specifically engineered to get actionable advice
+    const prompt = `A T-Mobile customer's feedback has a '${sentiment}' sentiment. Based on their comment, provide one concise, actionable recommendation for T-Mobile to address their specific concern. Do not greet or sign off.
+
+    Customer feedback: "${text}"
+    
+    Actionable recommendation:`;
+
+    const model = this.geminiClient.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    
+    console.log(`Generated insight for '${sentiment}' feedback.`);
+    return response.text().trim();
+  }
 }
 
 export default TranscriptionService;
