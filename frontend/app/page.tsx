@@ -97,9 +97,6 @@ const MONTH_LIST_2025 = [
   'Jan 2025','Feb 2025','Mar 2025','Apr 2025','May 2025','Jun 2025','Jul 2025','Aug 2025','Sep 2025','Oct 2025','Nov 2025','Dec 2025',
 ];
 const chartMonthlyData: Record<string, { date: string, value: number }[]> = {};
-MONTH_LIST_2025.forEach((label, i) => {
-  chartMonthlyData[label] = makeTrend(i);
-});
 const chartMonths = MONTH_LIST_2025;
 
 // (moved below originalCustomers)
@@ -341,23 +338,7 @@ export default function DashboardPage() {
   const isFutureMonth = selYear > now.getFullYear() || 
     (selYear === now.getFullYear() && selMonthIndex > now.getMonth());
 
-  // Effect: For curr month, add a new point for today (if not already present) every 3s, simulating real-time (Robinhood style)
-  useEffect(() => {
-    if (!isCurrMonth) return;
-    const interval = setInterval(() => {
-      setTrend(trendData => {
-        const now = new Date();
-        const dateLabel = `${now.toLocaleString('default',{month:'short'})} ${now.getDate()}`;
-        const currMonthArr = trendData[selectedMonth] || [];
-        if (!currMonthArr.some(d => d.date === dateLabel)) {
-          const newPt = { date: dateLabel, value: 70 + Math.floor(Math.random()*21) };
-          return { ...trendData, [selectedMonth]: [...currMonthArr, newPt] };
-        }
-        return trendData;
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [selectedMonth, isCurrMonth]);
+  // Effect removed: No simulated data points; rely solely on backend data
 
   // Effect: Fetch KPIs (gauges) and update live
   useEffect(() => {
