@@ -61,7 +61,7 @@ type CustomerRow = {
 
 type ActionableInsight = {
   id: number;
-  type: 'survey' | 'social';
+  type: 'survey' | 'social' | 'reddit'; // add 'reddit' here
   sentiment: string;
   text: string;
   insight: string | null;
