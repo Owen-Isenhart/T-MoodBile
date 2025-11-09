@@ -185,10 +185,11 @@ export default function DashboardPage() {
   useEffect(() => {
     let isMounted = true;
     async function fetchKpis() {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/kpis`);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/dashboard/kpis`);
         if (!res.ok) return;
-        const data = await res.json();
+      const data = await res.json();
+      console.debug("[Dashboard] KPI response", data);
         if (!isMounted) return;
         const direct = data.direct_sentiment_breakdown || {};
         const indirect = data.indirect_sentiment_breakdown || {};
@@ -231,6 +232,7 @@ export default function DashboardPage() {
       const res = await fetch(`${API_BASE_URL}/api/dashboard/actionable-insights`);
       if (!res.ok) return;
       const data: ActionableInsight[] = await res.json();
+      console.debug("[Dashboard] Actionable insights response", data);
       setActionableInsights(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to load actionable insights", e);
@@ -272,6 +274,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/api/dashboard/sentiment-over-time`);
         if (!res.ok) return;
         const data: { date: string; good_percent: number }[] = await res.json();
+        console.debug("[Dashboard] Sentiment over time response", data);
         if (!isMounted) return;
         const bucket: { [k: string]: { date: string, value: number }[] } = {};
         const monthLabels = new Set<string>();
@@ -309,6 +312,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/api/dashboard/trends`);
         if (!res.ok) return;
         const payload = await res.json();
+        console.debug("[Dashboard] Trends response", payload);
         if (!isMounted) return;
         const parsed: TrendSeries[] = Object.entries(payload || {}).map(
           ([topic, values]: [string, any]) => ({
@@ -340,6 +344,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/api/dashboard/surveys`);
         if (!res.ok) return;
         const data: SurveyResponse[] = await res.json();
+        console.debug("[Dashboard] Surveys response", data);
         if (!isMounted) return;
         setSurveyResponses(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -360,6 +365,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/api/dashboard/social`);
         if (!res.ok) return;
         const data: SocialPost[] = await res.json();
+        console.debug("[Dashboard] Social response", data);
         if (!isMounted) return;
         setSocialPosts(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -380,6 +386,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/api/dashboard/customers`);
         if (!res.ok) return;
         const rows: { id: number; name: string; phone: string }[] = await res.json();
+        console.debug("[Dashboard] Customers response", rows);
         if (!isMounted) return;
         if (!Array.isArray(rows) || rows.length === 0) return;
         const levels = ["Rely","Amplified","All In"];
@@ -987,135 +994,6 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Additional Data Sections */}
-        <section className="mx-10 grid gap-6 mb-10 lg:grid-cols-3 sm:grid-cols-1">
-          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
-            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Google Trend Topics</h3>
-            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
-              {trendsData.length === 0 ? (
-                <p className="text-sm text-gray-500">No trend data available.</p>
-              ) : (
-                trendsData.map(series => {
-                  const latest = series.points.at(-1);
-                  return (
-                    <div key={series.topic} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-[#ED008C]">
-                          {series.topic}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {latest ? latest.date : ''}
-                        </span>
-                      </div>
-                      <div className="mt-1">
-                        <span className="text-2xl font-bold text-[#ED008C]">
-                          {latest ? Math.round(latest.value) : '--'}
-                        </span>
-                        <span className="text-xs text-gray-500 ml-1">score</span>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </Card>
-
-          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
-            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Latest Social Mentions</h3>
-            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
-              {socialPosts.length === 0 ? (
-                <p className="text-sm text-gray-500">No social posts ingested yet.</p>
-              ) : (
-                socialPosts.slice(0, 6).map(post => (
-                  <div key={post.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold uppercase text-[#ED008C]">
-                        {post.platform}
-                      </span>
-                      <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          post.sentiment === 'good'
-                            ? 'bg-green-100 text-green-700'
-                            : post.sentiment === 'neutral'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {post.sentiment}
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-700 leading-relaxed line-clamp-4">
-                      {post.text_content}
-                    </p>
-                    <div className="mt-2 flex items-center justify-between">
-                      <span className="text-[11px] text-gray-400">
-                        {new Date(post.created_at).toLocaleString()}
-                      </span>
-                      {post.post_url && (
-                        <a
-                          href={post.post_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] font-medium text-[#ED008C] hover:underline"
-                        >
-                          View
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
-            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Recent Survey Responses</h3>
-            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
-              {surveyResponses.length === 0 ? (
-                <p className="text-sm text-gray-500">No survey responses available.</p>
-              ) : (
-                surveyResponses.slice(0, 6).map(response => (
-                  <div key={response.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-sm font-semibold text-[#ED008C]">
-                          {response.customer_name || "Unknown Customer"}
-                        </span>
-                        {response.customer_phone && (
-                          <span className="text-xs text-gray-500 block">
-                            {response.customer_phone}
-                          </span>
-                        )}
-                      </div>
-                      <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          response.sentiment === 'good'
-                            ? 'bg-green-100 text-green-700'
-                            : response.sentiment === 'neutral'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {response.sentiment}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs text-gray-700 leading-relaxed line-clamp-4">
-                      {response.transcript || "No transcript provided."}
-                    </p>
-                    {response.insight && (
-                      <p className="mt-2 text-[11px] text-gray-500 italic">
-                        Insight: {response.insight}
-                      </p>
-                    )}
-                    <span className="text-[11px] text-gray-400 block mt-2">
-                      {new Date(response.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </section>
       </main>
 
       {openSentiment && (
@@ -1143,6 +1021,142 @@ export default function DashboardPage() {
             <div className="text-gray-700 text-sm leading-relaxed">
               Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
             </div>
+            {openSentiment.title === "Direct Sentiment" && (
+              <div className="mt-6 space-y-4 max-h-[360px] overflow-y-auto pr-1">
+                <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
+                  <div className="p-4">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Google Trend Topics</h4>
+                    <div className="space-y-3">
+                      {trendsData.length === 0 ? (
+                        <p className="text-sm text-gray-500">No trend data available.</p>
+                      ) : (
+                        trendsData.map(series => {
+                          const latest = series.points.at(-1);
+                          return (
+                            <div key={series.topic} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold uppercase tracking-wide text-[#ED008C]">
+                                  {series.topic}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {latest ? latest.date : ""}
+                                </span>
+                              </div>
+                              <div className="mt-1">
+                                <span className="text-xl font-bold text-[#ED008C]">
+                                  {latest ? Math.round(latest.value) : "--"}
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">score</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
+                  <div className="p-4">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Latest Social Mentions</h4>
+                    <div className="space-y-3">
+                      {socialPosts.length === 0 ? (
+                        <p className="text-sm text-gray-500">No social posts ingested yet.</p>
+                      ) : (
+                        socialPosts.slice(0, 6).map(post => (
+                          <div key={post.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs font-semibold uppercase text-[#ED008C]">
+                                {post.platform}
+                              </span>
+                              <span
+                                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                  post.sentiment === "good"
+                                    ? "bg-green-100 text-green-700"
+                                    : post.sentiment === "neutral"
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-red-100 text-red-700"
+                                }`}
+                              >
+                                {post.sentiment}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-700 leading-relaxed line-clamp-4">
+                              {post.text_content}
+                            </p>
+                            <div className="mt-2 flex items-center justify-between">
+                              <span className="text-[11px] text-gray-400">
+                                {new Date(post.created_at).toLocaleString()}
+                              </span>
+                              {post.post_url && (
+                                <a
+                                  href={post.post_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] font-medium text-[#ED008C] hover:underline"
+                                >
+                                  View
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
+                  <div className="p-4">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Recent Survey Responses</h4>
+                    <div className="space-y-3">
+                      {surveyResponses.length === 0 ? (
+                        <p className="text-sm text-gray-500">No survey responses available.</p>
+                      ) : (
+                        surveyResponses.slice(0, 6).map(response => (
+                          <div key={response.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="text-sm font-semibold text-[#ED008C]">
+                                  {response.customer_name || "Unknown Customer"}
+                                </span>
+                                {response.customer_phone && (
+                                  <span className="text-xs text-gray-500 block">
+                                    {response.customer_phone}
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                  response.sentiment === "good"
+                                    ? "bg-green-100 text-green-700"
+                                    : response.sentiment === "neutral"
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-red-100 text-red-700"
+                                }`}
+                              >
+                                {response.sentiment}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-xs text-gray-700 leading-relaxed line-clamp-4">
+                              {response.transcript || "No transcript provided."}
+                            </p>
+                            {response.insight && (
+                              <p className="mt-2 text-[11px] text-gray-500 italic">
+                                Insight: {response.insight}
+                              </p>
+                            )}
+                            <span className="text-[11px] text-gray-400 block mt-2">
+                              {new Date(response.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
           </div>
         </div>
       )}
