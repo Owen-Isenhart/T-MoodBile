@@ -14,12 +14,14 @@ async function runRedditScrape() {
 
 // Schedule the job to run at minute 0 of every hour (e.g., 1:00, 2:00)
 export function startRedditCron() {
-  cron.schedule('0 * * * *', runRedditScrape, {
+  // '0 */4 * * *' means "at minute 0, every 4th hour" 
+  // (e.g., at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+  cron.schedule('0 */4 * * *', runRedditScrape, {
     scheduled: true,
     timezone: "America/Chicago"
   });
   
-  console.log('Reddit cron job scheduled to run hourly.');
+  console.log('Reddit cron job scheduled to run every 4 hours.');
 
   // Optional: Run once on startup for testing
   // runRedditScrape();
