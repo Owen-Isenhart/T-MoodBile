@@ -31,6 +31,18 @@ function normalizePhoneNumber(input: string): string {
   return trimmed.replace(/\D/g, '');
 }
 
+function getMonthLabelFromISO(dateStr: string): string {
+  // dateStr expected: YYYY-MM-DD
+  const d = new Date(dateStr);
+  const monthAbbr = d.toLocaleString('en-US', { month: 'short' });
+  return `${monthAbbr} ${d.getFullYear()}`;
+}
+
+function getMonthDayLabelFromISO(dateStr: string): string {
+  const d = new Date(dateStr);
+  const monthAbbr = d.toLocaleString('en-US', { month: 'short' });
+  return `${monthAbbr} ${d.getDate()}`;
+}
 
 // --- SENTIMENT/GAUGE DUMMY DATA ---
 const sentimentStats = [
@@ -286,7 +298,7 @@ MONTH_LIST_2025.forEach((label, idx) => {
     }
   }
 })();
-const allCustomers: Customer[] = [...originalCustomers, ...generatedCustomers];
+const initialAllCustomers: Customer[] = [...originalCustomers, ...generatedCustomers];
 
 const levelColorClasses: Record<string, string> = {
   "Rely": "bg-blue-600 text-white",
@@ -308,6 +320,8 @@ export default function DashboardPage() {
   const [trend, setTrend] = useState<{ [k: string]: { date: string, value: number }[] }>(chartMonthlyData);
   // Sentiment stats (stateful so backend can update)
   const [sentimentStatsData, setSentimentStatsData] = useState(sentimentStats);
+  // Customers (stateful to load from backend)
+  const [allCustomers, setAllCustomers] = useState<Customer[]>(initialAllCustomers);
   // Insights state - FIFO list (newest first)
   const [insights, setInsights] = useState<{ id: number; text: string; completed: boolean }[]>([]);
   const [insightCounter, setInsightCounter] = useState(0);
@@ -345,6 +359,136 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [selectedMonth, isCurrMonth]);
 
+  // Effect: Fetch KPIs (gauges) and update live
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchKpis() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/kpis`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted) return;
+        const direct = data.direct_sentiment_breakdown || {};
+        const indirect = data.indirect_sentiment_breakdown || {};
+        const totalPos = data.total_customer_sentiment_percent ?? 0;
+        const indirectNeutral = Math.max(0, 100 - (indirect.positive_percent ?? 0) - (indirect.negative_percent ?? 0));
+        setSentimentStatsData([
+          {
+            title: "Direct Sentiment",
+            positive: Math.round(direct.good_percent ?? 0),
+            neutral: Math.round(direct.neutral_percent ?? 0),
+            negative: Math.round(direct.bad_percent ?? 0),
+            colors: ["#70FF99", "#FDD657", "#CC0000"],
+          },
+          {
+            title: "Indirect Sentiment",
+            positive: Math.round(indirect.positive_percent ?? 0),
+            neutral: Math.round(indirectNeutral),
+            negative: Math.round(indirect.negative_percent ?? 0),
+            colors: ["#70FF99", "#FDD657", "#CC0000"],
+          },
+          {
+            title: "Total Customer Sentiment",
+            positive: Math.round(totalPos),
+            neutral: 0,
+            negative: Math.max(0, Math.round(100 - totalPos)),
+            colors: ["#70FF99", "#FDD657", "#CC0000"],
+          },
+        ]);
+      } catch (e) {
+        // silent fail
+      }
+    }
+    fetchKpis();
+    const id = setInterval(fetchKpis, 5000);
+    return () => { isMounted = false; clearInterval(id); };
+  }, []);
+
+  // Effect: Fetch sentiment-over-time and map into month buckets
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchTrend() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/sentiment-over-time`);
+        if (!res.ok) return;
+        const data: { date: string; good_percent: number }[] = await res.json();
+        if (!isMounted) return;
+        const bucket: { [k: string]: { date: string, value: number }[] } = {};
+        data.forEach(pt => {
+          const monthLabel = getMonthLabelFromISO(pt.date);
+          const dayLabel = getMonthDayLabelFromISO(pt.date);
+          if (!bucket[monthLabel]) bucket[monthLabel] = [];
+          bucket[monthLabel].push({ date: dayLabel, value: pt.good_percent });
+        });
+        setTrend(prev => ({ ...prev, ...bucket }));
+      } catch (e) {
+        // silent
+      }
+    }
+    fetchTrend();
+    // no polling required here unless needed
+    return () => { isMounted = false; };
+  }, []);
+
+  // Effect: Fetch customers and populate Oct/Nov months
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchCustomers() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/customers`);
+        if (!res.ok) return;
+        const rows: { id: number; name: string; phone: string }[] = await res.json();
+        if (!isMounted) return;
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        const levels = ["Rely","Amplified","All In"];
+        const countries = ["USA","India","Germany","UK","Canada","Spain","Denmark","Australia","Canada","United States"];
+        const randDay = (monthIndex: number) => {
+          const year = 2025;
+          const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+          return Math.max(1, Math.min(daysInMonth, Math.floor(Math.random() * daysInMonth) + 1));
+        };
+        // Assign half to Oct (index 9) and half to Nov (index 10). Duplicate if only one to fill both.
+        const out: Customer[] = [];
+        const half = Math.ceil(rows.length / 2);
+        const octRows = rows.slice(0, half);
+        const novRows = rows.slice(half);
+        // Ensure both months have data
+        const octMonthAbbr = 'Oct';
+        const novMonthAbbr = 'Nov';
+        const yearStr = '2025';
+        octRows.forEach(r => {
+          const d = randDay(9);
+          out.push({
+            order: `#${r.id}`,
+            name: r.name,
+            email: '', // not displayed
+            date: `${octMonthAbbr} ${d}, ${yearStr}`,
+            level: levels[Math.floor(Math.random() * levels.length)],
+            country: countries[Math.floor(Math.random() * countries.length)],
+            phone: r.phone,
+          } as Customer);
+        });
+        const novSource = novRows.length > 0 ? novRows : rows.slice(0, Math.max(1, Math.min(3, rows.length)));
+        novSource.forEach(r => {
+          const d = randDay(10);
+          out.push({
+            order: `#${r.id}`,
+            name: r.name,
+            email: '',
+            date: `${novMonthAbbr} ${d}, ${yearStr}`,
+            level: levels[Math.floor(Math.random() * levels.length)],
+            country: countries[Math.floor(Math.random() * countries.length)],
+            phone: r.phone,
+          } as Customer);
+        });
+        setAllCustomers(out);
+      } catch (e) {
+        // silent
+      }
+    }
+    fetchCustomers();
+    return () => { isMounted = false; };
+  }, []);
   // Chart data to display: up to today if in current month, empty if future month, otherwise all
   let chartData = trend[selectedMonth] || [];
   if (isFutureMonth) {
@@ -396,7 +540,7 @@ export default function DashboardPage() {
       const results: string[] = [];
       for (const c of toCall) {
         const normalized = normalizePhoneNumber(c.phone);
-        const createRes = await fetch(`/api/proxy/customers`, {
+        const createRes = await fetch(`${API_BASE_URL}/api/customers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: c.name, phone: normalized }),
@@ -412,7 +556,7 @@ export default function DashboardPage() {
           results.push(`${c.name}: missing id from customer response`);
           continue;
         }
-        const callRes = await fetch(`/api/proxy/calls/${id}`, { method: 'POST' });
+        const callRes = await fetch(`${API_BASE_URL}/api/calls/${id}`, { method: 'POST' });
         if (!callRes.ok) {
           const errText = await callRes.text();
           results.push(`${c.name}: call failed (${errText})`);
