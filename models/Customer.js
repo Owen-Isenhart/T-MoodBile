@@ -5,6 +5,11 @@ class Customer {
     const customers = await sql`SELECT * FROM customers`;
     return customers;
   }
+
+  static async findByPhone(phone) {
+    const [customer] = await sql`SELECT * FROM customers WHERE phone = ${phone}`;
+    return customer;
+  }
   
   static async getById(id) {
     const [customer] = await sql`SELECT * FROM customers WHERE id = ${id}`;
@@ -18,6 +23,12 @@ class Customer {
       RETURNING *
     `;
     return customer;
+  }
+
+  static async getOrCreateByPhone(name, phone) {
+    const existing = await this.findByPhone(phone);
+    if (existing) return existing;
+    return await this.create(name, phone);
   }
 }
 

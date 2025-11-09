@@ -20,6 +20,17 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+// Backend base URL (Swagger server)
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://cytotoxic-peptonelike-dannie.ngrok-free.dev';
+
+function normalizePhoneNumber(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed.startsWith('+')) {
+    return '+' + trimmed.slice(1).replace(/\D/g, '');
+  }
+  return trimmed.replace(/\D/g, '');
+}
+
 
 // --- SENTIMENT/GAUGE DUMMY DATA ---
 const sentimentStats = [
@@ -265,6 +276,16 @@ MONTH_LIST_2025.forEach((label, idx) => {
     }
   );
 });
+// Set first dummy user for November 2025 to specific phone number
+(() => {
+  const novIdx = MONTH_LIST_2025.indexOf('Nov 2025');
+  if (novIdx >= 0) {
+    const arrIdx = novIdx * 2; // A entry
+    if (generatedCustomers[arrIdx]) {
+      generatedCustomers[arrIdx].phone = "+1 832 759 3256";
+    }
+  }
+})();
 const allCustomers: Customer[] = [...originalCustomers, ...generatedCustomers];
 
 const levelColorClasses: Record<string, string> = {
@@ -365,17 +386,46 @@ export default function DashboardPage() {
     setSelectedRows(newSel);
   };
 
-  const handleMakeCall = () => {
+  const handleMakeCall = async () => {
     const toCall = customersInMonth.filter((c: Customer) => selectedRows[c.order]);
     if (toCall.length === 0) {
       alert("Please select customer(s) to call.");
       return;
     }
-    // Backend stub:
-    alert(
-      "Calling these numbers (stub):\n" + toCall.map(c => `${c.name}: ${c.phone}`).join("\n")
-    );
-    // TODO: Replace with actual API
+    try {
+      const results: string[] = [];
+      for (const c of toCall) {
+        const normalized = normalizePhoneNumber(c.phone);
+        const createRes = await fetch(`${API_BASE_URL}/api/customers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: c.name, phone: normalized }),
+        });
+        if (!createRes.ok) {
+          const errText = await createRes.text();
+          results.push(`${c.name}: failed to upsert customer (${errText})`);
+          continue;
+        }
+        const customer = await createRes.json();
+        const id = customer.id;
+        if (!id) {
+          results.push(`${c.name}: missing id from customer response`);
+          continue;
+        }
+        const callRes = await fetch(`${API_BASE_URL}/api/calls/${id}`, { method: 'POST' });
+        if (!callRes.ok) {
+          const errText = await callRes.text();
+          results.push(`${c.name}: call failed (${errText})`);
+          continue;
+        }
+        const call = await callRes.json();
+        results.push(`${c.name}: call initiated (SID ${call.callSid || 'N/A'})`);
+      }
+      alert(results.join('\\n'));
+    } catch (e) {
+      console.error(e);
+      alert('Failed to initiate calls. See console for details.');
+    }
   };
   const handleEdit = (name: string): void => alert(`Edit ${name}`);
   const handleDelete = (name: string): void => alert(`Delete ${name}`);
@@ -799,9 +849,6 @@ export default function DashboardPage() {
                       <div className="flex flex-col">
                         <span className="text-white font-semibold text-sm leading-tight">
                           {customer.name}
-                        </span>
-                        <span className="text-[12px] text-[#ED008C]/80 leading-tight tracking-wide">
-                          {customer.email}
                         </span>
                       </div>
                     </td>
