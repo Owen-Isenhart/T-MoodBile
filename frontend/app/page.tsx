@@ -19,6 +19,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useRequireName } from "@/lib/utils";
 
 // Backend base URL (Swagger server)
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://cytotoxic-peptonelike-dannie.ngrok-free.dev';
@@ -137,7 +138,12 @@ async function fetchJson<T = any>(
 ): Promise<T | null> {
   const tag = label ? `[Dashboard] ${label}` : "[Dashboard]";
   try {
-    const res = await fetch(url, options);
+    // Inject ngrok-skip-browser-warning header!
+    const headers = {
+      ...(options?.headers || {}),
+      "ngrok-skip-browser-warning": "true"
+    };
+    const res = await fetch(url, { ...options, headers });
     const raw = await res.text();
     console.debug(`${tag} raw response`, raw);
     if (!res.ok) {
@@ -158,8 +164,7 @@ async function fetchJson<T = any>(
 
 // --- MAIN COMPONENT ---
 export default function DashboardPage() {
-  
-  
+  const userName = useRequireName();
   // --- State ---
   const currentMonthLabel = useMemo(() => formatMonthLabel(new Date()), []);
   const initialMonths = useMemo(() => {
@@ -198,8 +203,6 @@ export default function DashboardPage() {
   const isFutureMonth =
     selYear > now.getFullYear() ||
     (selYear === now.getFullYear() && selMonthIndex > now.getMonth());
-
-  const userName = "User";
 
   useEffect(() => {
     setSelectedRows({});
@@ -277,12 +280,14 @@ export default function DashboardPage() {
   const handleResolveInsight = useCallback(async (insight: ActionableInsight) => {
     try {
       setResolvingInsightId(insight.id);
+      // If the type is 'reddit', treat it as 'social' for backend
+      const typeForBackend = insight.type === 'reddit' ? 'social' : insight.type;
       await fetchJson(
         `${API_BASE_URL}/api/sentiments/resolve`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: insight.type, id: insight.id }),
+          body: JSON.stringify({ type: typeForBackend, id: insight.id }),
         },
         'Resolve Insight'
       );
@@ -297,12 +302,12 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Effect: Fetch sentiment-over-time and map into month buckets
+  // Effect: Fetch sentiment-over-time and map into month buckets (with fixed value)
   useEffect(() => {
     let isMounted = true;
     async function fetchTrend() {
       try {
-        const data = await fetchJson<{ date: string; good_percent: number }[]>(
+        const data = await fetchJson<{ date: string; total_sentiment_percent: number }[]>(
           `${API_BASE_URL}/api/dashboard/sentiment-over-time`,
           undefined,
           "Sentiment Over Time"
@@ -315,13 +320,23 @@ export default function DashboardPage() {
           monthLabels.add(monthLabel);
           const dayLabel = getMonthDayLabelFromISO(pt.date);
           if (!bucket[monthLabel]) bucket[monthLabel] = [];
-          bucket[monthLabel].push({ date: dayLabel, value: pt.good_percent });
+          bucket[monthLabel].push({ date: dayLabel, value: pt.total_sentiment_percent });
         });
         setTrend(prev => ({ ...prev, ...bucket }));
         setChartMonths(prev => {
-          const next = new Set(prev);
-          monthLabels.forEach(label => next.add(label));
-          const arr = Array.from(next);
+          const allLabels = Array.from(monthLabels);
+          // Chronologically sort: use Date parsing, e.g. parse first of each month
+          allLabels.sort((a, b) => {
+            const parseLabel = (label: string) => {
+              // e.g. 'Oct 2025'
+              const [monthStr, yearStr] = label.split(' ');
+              return new Date(`${monthStr} 1, ${yearStr}`);
+            };
+            return parseLabel(a).getTime() - parseLabel(b).getTime();
+          });
+          // Also add any months in prev that were already present that aren't in monthLabels
+          const extras = prev.filter(m => !allLabels.includes(m));
+          const arr = [...allLabels, ...extras];
           if (!arr.includes(selectedMonth) && arr.length > 0) {
             setSelectedMonth(arr[0]);
           }
@@ -332,7 +347,6 @@ export default function DashboardPage() {
       }
     }
     fetchTrend();
-    // no polling required here unless needed
     return () => { isMounted = false; };
   }, []);
 
@@ -483,8 +497,34 @@ export default function DashboardPage() {
     fetchCustomers();
     return () => { isMounted = false; };
   }, []);
-  // Chart data to display: up to today if in current month, empty if future month, otherwise all
-  let chartData = trend[selectedMonth] || [];
+  // --- PART 1: Fix Sentiment Over Time "Show All" Option ---
+  // In Sentiment Over Time month dropdown UI
+  // In chart data calculation, just after trend is set/derived:
+  let chartData : {date: string, value: number }[] = [];
+  if (selectedMonth === 'ALL_MONTHS') {
+    // Concatenate all months' series, sorted by date, no duplication
+    chartData = Object.values(trend).flat().sort((a, b) => {
+      // a.date and b.date are 'Mon DD' labels, but let's parse back to Date by combining with year as best match
+      const parseLabel = (label: string) => {
+        // Try to infer year from monthLabel
+        const monthIndex = label.indexOf(' ');
+        if (monthIndex === -1) return new Date();
+        const [mon, day] = label.split(' ');
+        // Find matching year from keys in trend
+        let year = new Date().getFullYear();
+        for (const k in trend) {
+          if (k.startsWith(mon)) {
+            year = Number(k.split(' ')[1]);
+            break;
+          }
+        }
+        return new Date(`${mon} ${day}, ${year}`);
+      };
+      return parseLabel(a.date).getTime() - parseLabel(b.date).getTime();
+    });
+  } else {
+    chartData = trend[selectedMonth] || [];
+  }
   if (isFutureMonth) {
     chartData = []; // No data for future months
   } else if (isCurrMonth) {
@@ -500,7 +540,9 @@ export default function DashboardPage() {
   }
 
   // --- CUSTOMER TABLE (Filtered by Month) ---
-  const customersInMonth = allCustomers.filter(c => c.monthLabel === selectedMonth);
+  const customersInMonth = selectedMonth === 'ALL_MONTHS'
+    ? allCustomers
+    : allCustomers.filter(c => c.monthLabel === selectedMonth);
   // Helper for Select All state
   const allChecked =
     customersInMonth.length > 0 &&
@@ -521,6 +563,8 @@ export default function DashboardPage() {
     setSelectedRows(newSel);
   };
 
+  // --- PART 2: Make Call handler ---
+  // In handleMakeCall:
   const handleMakeCall = async () => {
     const toCall = customersInMonth.filter(c => selectedRows[c.id]);
     if (toCall.length === 0) {
@@ -530,26 +574,13 @@ export default function DashboardPage() {
     try {
       const results: string[] = [];
       for (const c of toCall) {
-        const normalized = normalizePhoneNumber(c.phone);
+        // Directly POST to /api/calls/{id}
+        const customerId = c.id;
         try {
-          const customer = await fetchJson<{ id?: number }>(
-            `${API_BASE_URL}/api/customers`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: c.name, phone: normalized }),
-            },
-            `Upsert Customer ${normalized}`
-          );
-          const id = customer?.id;
-          if (!id) {
-            results.push(`${c.name}: missing id from customer response`);
-            continue;
-          }
           const call = await fetchJson<{ callSid?: string }>(
-            `${API_BASE_URL}/api/calls/${id}`,
+            `${API_BASE_URL}/api/calls/${customerId}`,
             { method: 'POST' },
-            `Call Customer ${id}`
+            `Call Customer ${customerId}`
           );
           results.push(`${c.name}: call initiated (SID ${call?.callSid || 'N/A'})`);
         } catch (err: any) {
@@ -602,12 +633,14 @@ export default function DashboardPage() {
   // Arc color order: Positive (start 180), Neutral, Negative
   const arcStartAngles = [180, 180, 180];
 
+  if (!userName) return null;
+
   return (
     <div
       className="min-h-screen bg-pink-500/100 flex"
     >
       {/* Sidebar */}
-      <aside className="w-[270px] min-w-[220px] bg-white flex flex-col items-center py-6 px-4 border-r-2 border-black">
+      <aside className="w-[270px] min-w-[220px] bg-white flex flex-col items-center py-6 px-4 border-r-2 border-black sticky top-0 h-screen max-h-screen overflow-y-auto z-30">
         {/* Logo */}
         <div className="flex items-center gap-4 w-full mb-3 px-4">
           <div className="w-12 h-12 flex items-center justify-center">
@@ -620,58 +653,69 @@ export default function DashboardPage() {
         {/* Insights Section */}
         <div className="w-full mt-1 flex-1 flex flex-col">
           <h3 className="text-[#ED008C] text-lg font-semibold mb-3 px-2">Insights</h3>
-          <div className="flex-1 overflow-y-auto space-y-2 px-2">
-            {actionableInsights.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center mt-4">No actionable insights pending.</p>
-            ) : (
-              actionableInsights.map((insight) => (
-                <div
-                  key={`${insight.type}-${insight.id}`}
-                  className="bg-pink-50 border border-pink-100 rounded-lg p-3 shadow-sm"
-                >
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[#ED008C] uppercase">
-                        {insight.type}
-                      </span>
-                      <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          insight.sentiment === 'good'
-                            ? 'bg-green-100 text-green-700'
-                            : insight.sentiment === 'neutral'
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {insight.sentiment}
-                      </span>
-                    </div>
-                    <p className="text-gray-700 text-xs leading-relaxed">
-                      {insight.insight || insight.text}
-                    </p>
-                    {insight.customer_name && (
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        {insight.customer_name}
-                        {insight.customer_phone ? ` • ${insight.customer_phone}` : ""}
+          <div className="relative flex-1">
+            {/* Scrollable insights list (max-h full sidebar minus logo/header/refresh) */}
+            <div className="absolute inset-0 flex-1 overflow-y-auto space-y-2 px-2 pb-20" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+              {actionableInsights.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center mt-4">No actionable insights pending.</p>
+              ) : (
+                actionableInsights.map((insight) => (
+                  <div
+                    key={`${insight.type}-${insight.id}`}
+                    className="bg-pink-50 border border-pink-100 rounded-lg p-3 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[#ED008C] uppercase">
+                          {insight.type}
+                        </span>
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            insight.sentiment === 'good'
+                              ? 'bg-green-100 text-green-700'
+                              : insight.sentiment === 'neutral'
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          {insight.sentiment}
+                        </span>
+                      </div>
+                      <p className="text-gray-700 text-xs leading-relaxed">
+                        {insight.insight || insight.text}
                       </p>
-                    )}
+                      {insight.customer_name && (
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          {insight.customer_name}
+                          {insight.customer_phone ? ` • ${insight.customer_phone}` : ""}
+                        </p>
+                      )}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-[11px] text-gray-400">
+                        {new Date(insight.created_at).toLocaleString()}
+                      </span>
+                      <button
+                        onClick={() => handleResolveInsight(insight)}
+                        disabled={resolvingInsightId === insight.id}
+                        className="text-[#ED008C] hover:opacity-90 text-xs font-medium flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 size={14} />
+                        Mark Resolved
+                      </button>
+                    </div>
                   </div>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-[11px] text-gray-400">
-                      {new Date(insight.created_at).toLocaleString()}
-                    </span>
-                    <button
-                      onClick={() => handleResolveInsight(insight)}
-                      disabled={resolvingInsightId === insight.id}
-                      className="text-[#ED008C] hover:opacity-90 text-xs font-medium flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      <Trash2 size={14} />
-                      Mark Resolved
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
+            {/* Fixed Refresh Button at the bottom of the sidebar (inside Insights section) */}
+            <button
+              onClick={fetchActionableInsights}
+              className="absolute left-0 right-0 bottom-2 mx-4 bg-[#ED008C] text-white font-semibold text-sm rounded-lg px-4 py-2 shadow-lg hover:opacity-90 transition flex items-center gap-2 w-[90%]"
+              style={{ minWidth: '60%', zIndex: 10 }}
+            >
+              <span className="text-lg">↻</span> Refresh Insights
+            </button>
           </div>
         </div>
       </aside>
@@ -779,15 +823,16 @@ export default function DashboardPage() {
             {/* Month Dropdown */}
             <div className="relative">
               <button type="button"
-                className="flex items-center bg-white/80 text-sm px-2.5 py-1 rounded-md border border-[#ED008C] text-[#ED008C] hover:bg-[#ED008C]/10 transition font-medium min-w-[128px]"
+                className="flex items-center bg-white/80 text-sm px-2.5 py-1 rounded-md border border-[#ED008C] text-[#ED008C] font-medium min-w-[128px]"
               >
-                {selectedMonth}
+                {selectedMonth === 'ALL_MONTHS' ? 'Show All' : selectedMonth}
                 <ChevronDown size={16} className="ml-2" />
                 <select
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   value={selectedMonth}
                   onChange={e => setSelectedMonth(e.target.value)}
                 >
+                  <option value="ALL_MONTHS">Show All</option>
                   {chartMonths.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -888,17 +933,17 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <button
-                  type="button"
-                  className="flex items-center bg-white/80 text-sm px-2.5 py-1 rounded-md border border-[#ED008C] text-[#ED008C] hover:bg-[#ED008C]/10 transition font-medium min-w-[100px]"
+                <button type="button"
+                  className="flex items-center bg-white/80 text-sm px-2.5 py-1 rounded-md border border-[#ED008C] text-[#ED008C] font-medium min-w-[100px]"
                 >
-                  {selectedMonth}
+                  {selectedMonth === 'ALL_MONTHS' ? 'Show All' : selectedMonth}
                   <ChevronDown size={16} className="ml-2" />
                   <select
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     value={selectedMonth}
                     onChange={e => setSelectedMonth(e.target.value)}
                   >
+                    <option value="ALL_MONTHS">Show All</option>
                     {chartMonths.map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}
@@ -1034,7 +1079,7 @@ export default function DashboardPage() {
       {openSentiment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setOpenSentiment(null)} />
-          <div className="relative z-10 w-[560px] max-w-[92vw] bg-white rounded-xl shadow-2xl p-6 border border-[#ED008C]/20">
+          <div className="relative z-10 w-[460px] max-w-[92vw] bg-white rounded-xl shadow-2xl p-6 border border-[#ED008C]/20">
             <div className="flex items-start justify-between mb-3">
               <h3 className="text-2xl font-extrabold text-[#ED008C]">{openSentiment.title}</h3>
               <button onClick={() => setOpenSentiment(null)} className="text-[#ED008C] font-semibold px-3 py-1 border border-[#ED008C] rounded-md hover:bg-[#ED008C]/10 transition text-sm">Close</button>
@@ -1053,22 +1098,20 @@ export default function DashboardPage() {
                 <div className="text-xl font-extrabold">{openSentiment.negative}%</div>
               </div>
             </div>
-            <div className="text-gray-700 text-sm leading-relaxed">
-              Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
-            </div>
-            {openSentiment.title === "Direct Sentiment" && (
-              <div className="mt-6 space-y-4 max-h-[360px] overflow-y-auto pr-1">
+            {/* For Indirect Sentiment: */}
+            {openSentiment.title === "Indirect Sentiment" && (
+              <div className="mt-4 space-y-2 max-h-[320px] overflow-y-auto pr-1">
                 <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
-                  <div className="p-4">
-                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Google Trend Topics</h4>
-                    <div className="space-y-3">
+                  <div className="p-3">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-1">Google Trend Topics</h4>
+                    <div className="space-y-2">
                       {trendsData.length === 0 ? (
                         <p className="text-sm text-gray-500">No trend data available.</p>
                       ) : (
                         trendsData.map(series => {
                           const latest = series.points.at(-1);
                           return (
-                            <div key={series.topic} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                            <div key={series.topic} className="border border-pink-100 rounded-lg p-2 bg-pink-50">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold uppercase tracking-wide text-[#ED008C]">
                                   {series.topic}
@@ -1077,8 +1120,8 @@ export default function DashboardPage() {
                                   {latest ? latest.date : ""}
                                 </span>
                               </div>
-                              <div className="mt-1">
-                                <span className="text-xl font-bold text-[#ED008C]">
+                              <div className="mt-0.5">
+                                <span className="text-lg font-bold text-[#ED008C]">
                                   {latest ? Math.round(latest.value) : "--"}
                                 </span>
                                 <span className="text-xs text-gray-500 ml-1">score</span>
@@ -1090,17 +1133,22 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </Card>
-
+              </div>
+            )}
+            {/* For Direct Sentiment: */}
+            {openSentiment.title === "Direct Sentiment" && (
+              <div className="mt-4 space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                {/* Only Social Mentions and Survey Responses cards, NO trends card */}
                 <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
-                  <div className="p-4">
-                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Latest Social Mentions</h4>
-                    <div className="space-y-3">
+                  <div className="p-3">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-1">Latest Social Mentions</h4>
+                    <div className="space-y-2">
                       {socialPosts.length === 0 ? (
                         <p className="text-sm text-gray-500">No social posts ingested yet.</p>
                       ) : (
                         socialPosts.slice(0, 6).map(post => (
-                          <div key={post.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
-                            <div className="flex items-center justify-between mb-1">
+                          <div key={post.id} className="border border-pink-100 rounded-lg p-2 bg-pink-50">
+                            <div className="flex items-center justify-between mb-0.5">
                               <span className="text-xs font-semibold uppercase text-[#ED008C]">
                                 {post.platform}
                               </span>
@@ -1119,7 +1167,7 @@ export default function DashboardPage() {
                             <p className="text-xs text-gray-700 leading-relaxed line-clamp-4">
                               {post.text_content}
                             </p>
-                            <div className="mt-2 flex items-center justify-between">
+                            <div className="mt-1 flex items-center justify-between">
                               <span className="text-[11px] text-gray-400">
                                 {new Date(post.created_at).toLocaleString()}
                               </span>
@@ -1140,16 +1188,15 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </Card>
-
                 <Card className="border border-[#ED008C]/30 rounded-lg shadow-sm">
-                  <div className="p-4">
-                    <h4 className="text-[#ED008C] font-semibold text-base mb-2">Recent Survey Responses</h4>
-                    <div className="space-y-3">
+                  <div className="p-3">
+                    <h4 className="text-[#ED008C] font-semibold text-base mb-1">Recent Survey Responses</h4>
+                    <div className="space-y-2">
                       {surveyResponses.length === 0 ? (
                         <p className="text-sm text-gray-500">No survey responses available.</p>
                       ) : (
                         surveyResponses.slice(0, 6).map(response => (
-                          <div key={response.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                          <div key={response.id} className="border border-pink-100 rounded-lg p-2 bg-pink-50">
                             <div className="flex items-center justify-between">
                               <div>
                                 <span className="text-sm font-semibold text-[#ED008C]">
@@ -1173,15 +1220,15 @@ export default function DashboardPage() {
                                 {response.sentiment}
                               </span>
                             </div>
-                            <p className="mt-2 text-xs text-gray-700 leading-relaxed line-clamp-4">
+                            <p className="mt-1 text-xs text-gray-700 leading-relaxed line-clamp-4">
                               {response.transcript || "No transcript provided."}
                             </p>
                             {response.insight && (
-                              <p className="mt-2 text-[11px] text-gray-500 italic">
+                              <p className="mt-1 text-[11px] text-gray-500 italic">
                                 Insight: {response.insight}
                               </p>
                             )}
-                            <span className="text-[11px] text-gray-400 block mt-2">
+                            <span className="text-[11px] text-gray-400 block mt-1">
                               {new Date(response.created_at).toLocaleString()}
                             </span>
                           </div>
