@@ -9,8 +9,7 @@ axios.get('https://jsonplaceholder.typicode.com/todos/1')
     console.error('Error with Axios test:', error);  
   });
 
-// Your UptimeRobot API Key (replace with your actual key)
-const apiKey = '';  
+const apiKey = 'api key';  
 
 const url = 'https://api.uptimerobot.com/v2/getMonitors';
 
