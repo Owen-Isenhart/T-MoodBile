@@ -16,6 +16,16 @@ class SurveyResponse {
     const responses = await sql`SELECT * FROM survey_responses`;
     return responses;
   }
+
+  static async markAsResolved(id) {
+    const [response] = await sql`
+      UPDATE survey_responses
+      SET is_resolved = true
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    return response;
+  }
 }
 
 export default SurveyResponse;

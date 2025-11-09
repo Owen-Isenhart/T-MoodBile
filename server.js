@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import { startSentimentCron } from './SentimentCron.js';// Swagger Imports
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
-
+import sentimentRoutes from './routes/sentimentRoutes.js';
 import callRoutes from './routes/callRoutes.js';
 import twilioRoutes from './routes/twilioRoutes.js';
 
@@ -34,7 +34,7 @@ const swaggerOptions = {
     ],
   },
   // Path to the API docs (your route files)
-  apis: ['./routes/*.js'],
+  apis: ['./routes/*.js', './models/*.js'], // Make sure it includes the new route file
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
@@ -48,6 +48,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 // Use routes
 app.use('/api/calls', callRoutes);
 app.use('/api/twilio', twilioRoutes);
+app.use('/api/sentiments', sentimentRoutes);
 
 // Start server
 const PORT = process.env.PORT || 3000;
