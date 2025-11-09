@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SpeechClient } from '@google-cloud/speech';
 import axios from 'axios';
 
-class TranscriptionService {
+class AiAnalysisService {
   constructor() {
     this.geminiClient = new GoogleGenerativeAI(process.env.GEMINI_KEY);
     this.speechClient = new SpeechClient();
@@ -79,4 +79,4 @@ class TranscriptionService {
   }
 }
 
-export default TranscriptionService;
+export default AiAnalysisService;
