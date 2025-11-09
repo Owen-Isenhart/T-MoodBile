@@ -130,53 +130,52 @@ export async function getDashboardKpis(req, res) {
 // Gets the daily "good" sentiment percentage from direct sources
 export async function getSentimentOverTime(req, res) {
   try {
-    // 1. Get daily counts from surveys
-    const surveys = await sql`
+    const sentimentHistory = await sql`
+      WITH direct_daily AS (
+        -- CTE 1: Calculate daily "good" percent from direct feedback (calls + social)
+        SELECT
+            DATE_TRUNC('day', created_at) AS date,
+            (COUNT(*) FILTER (WHERE sentiment = 'good')::float / COUNT(*)::float) * 100 AS good_percent
+        FROM (
+            SELECT created_at, sentiment FROM survey_responses WHERE sentiment IS NOT NULL
+            UNION ALL
+            SELECT created_at, sentiment FROM social_media_sentiments WHERE sentiment IS NOT NULL
+        ) AS direct_feedback
+        GROUP BY 1
+      ),
+      indirect_daily AS (
+        -- CTE 2: Calculate daily "positive" percent from indirect trends
+        SELECT
+            date::date AS date,
+            -- Use NULLIF to prevent divide-by-zero errors if total is 0
+            (SUM(CASE WHEN intent = 'positive' THEN value ELSE 0 END)::float / NULLIF(SUM(value), 0)::float) * 100 AS positive_percent
+        FROM google_trends_data
+        GROUP BY 1
+      )
+      -- Final Step: Combine them with a weighted average
       SELECT
-        DATE_TRUNC('day', created_at) AS date,
-        COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE sentiment = 'good') AS good
-      FROM survey_responses
-      GROUP BY 1
+          COALESCE(d.date, i.date)::date AS date,
+          
+          -- Calculate the weighted "Total Sentiment".
+          -- We use 70% weight for direct feedback and 30% for indirect trends.
+          -- COALESCE handles days where one data source might be missing.
+          (COALESCE(d.good_percent, i.positive_percent, 50) * 0.7) + 
+          (COALESCE(i.positive_percent, d.good_percent, 50) * 0.3) AS total_sentiment_percent
+          
+      FROM direct_daily d
+      FULL OUTER JOIN indirect_daily i ON d.date = i.date
+      WHERE COALESCE(d.date, i.date) IS NOT NULL
+      ORDER BY date ASC;
     `;
 
-    // 2. Get daily counts from social
-    const social = await sql`
-      SELECT
-        DATE_TRUNC('day', created_at) AS date,
-        COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE sentiment = 'good') AS good
-      FROM social_media_sentiments
-      GROUP BY 1
-    `;
-
-    // 3. Combine data into a single map
-    const combined = new Map();
-
-    surveys.forEach(row => {
-      const date = row.date.toISOString().split('T')[0];
-      if (!combined.has(date)) combined.set(date, { total: 0, good: 0 });
-      combined.get(date).total += parseInt(row.total);
-      combined.get(date).good += parseInt(row.good);
-    });
-
-    social.forEach(row => {
-      const date = row.date.toISOString().split('T')[0];
-      if (!combined.has(date)) combined.set(date, { total: 0, good: 0 });
-      combined.get(date).total += parseInt(row.total);
-      combined.get(date).good += parseInt(row.good);
-    });
-
-    // 4. Convert to array and calculate percentages
-    const overTimeData = Array.from(combined, ([date, counts]) => ({
-      date: date,
-      good_percent: parseFloat(((counts.good / counts.total) * 100).toFixed(1))
+    // The data is already perfectly formatted for a chart
+    const chartData = sentimentHistory.map(row => ({
+      date: row.date.toISOString().split('T')[0],
+      // Renamed to 'total_sentiment_percent' to be clear
+      total_sentiment_percent: parseFloat(row.total_sentiment_percent.toFixed(1))
     }));
-    
-    // 5. Sort by date
-    overTimeData.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    res.json(overTimeData);
+    res.json(chartData);
 
   } catch (err) {
     console.error("Error in getSentimentOverTime:", err);

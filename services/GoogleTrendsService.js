@@ -2,15 +2,16 @@ import { getJson } from "serpapi";
 import 'dotenv/config';
 import GoogleTrendsData from '../models/GoogleTrendsData.js';
 
-// 1. Define keywords and their intent
+// --- THIS IS THE NEW, MORE BALANCED LIST ---
 const KEYWORDS_TO_TRACK = {
-  "How to cancel T-Mobile": "negative",
-  "Why is T-Mobile slow": "negative",
   "T-Mobile deals": "positive",
-  "T-Mobile 5G internet": "positive"
+  "T-Mobile 5G internet": "positive",
+  "T-Mobile outage": "negative",       // <-- NEW high-volume negative
+  "T-Mobile problems": "negative"      // <-- NEW high-volume negative
 };
+// ---
 
-class GoogleTrendsService {
+export default class GoogleTrendsService {
   /**
    * Fetches comparative trend data from SerpApi and stores it in the database.
    */
@@ -28,7 +29,7 @@ class GoogleTrendsService {
     };
 
     try {
-      const data = await getJson(params); // Uses serpapi
+      const data = await getJson(params);
 
       if (!data.interest_over_time || !data.interest_over_time.timeline_data) {
         console.log('GoogleTrendsService: No interest over time data found.');
@@ -57,5 +58,3 @@ class GoogleTrendsService {
     }
   }
 }
-
-export default GoogleTrendsService;
