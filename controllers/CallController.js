@@ -1,12 +1,8 @@
-import TTSService from '../services/TTSService.js';
 import CallService from '../services/CallService.js';
-import TranscriptionService from '../services/TranscriptionService.js';
 import Customer from '../models/Customer.js';
-import SurveyResponse from '../models/SurveyResponse.js';
+import CallLog from '../models/CallLog.js'; // New model to track calls
 
-const ttsService = new TTSService(process.env.ELEVENLABS_KEY);
 const callService = new CallService();
-const transcriptionService = new TranscriptionService(process.env.GEMINI_KEY);
 
 async function callCustomer(req, res) {
   try {
@@ -14,30 +10,20 @@ async function callCustomer(req, res) {
     const customer = (await Customer.getAll()).find(c => c.id === parseInt(customerId));
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
-    // Generate TTS prompt
-    const promptFile = await ttsService.generateVoice(
-      "Our records indicate that you are currently a T-Mobile customer. Can you please describe how your experience has been?"
-    );
+    // This is the URL Twilio will request to get TwiML instructions
+    // We pass customerId so the TwiML endpoint knows who it's calling
+    const twimlUrl = `${process.env.BASE_URL}/api/twilio/twiml/${customerId}`;
 
     // Make the call
-    const callSid = await callService.makeCall(customer.phone, promptFile);
+    const callSid = await callService.makeCall(customer.phone, twimlUrl);
 
-    // Fetch recording URL from Twilio
-    const recordingUrl = await callService.getRecordingUrl(callSid);
+    // Log the call so we can link the CallSid to the customer later
+    await CallLog.create(customer.id, callSid);
 
-    // Transcribe customer response
-    const transcript = await transcriptionService.transcribeAudio(recordingUrl);
-
-    // Analyze sentiment
-    const sentiment = await transcriptionService.analyzeSentiment(transcript);
-
-    // Save to DB
-    const saved = await SurveyResponse.create(customer.id, transcript, sentiment);
-
-    res.json(saved);
+    res.json({ message: 'Call initiated successfully', callSid });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to complete call' });
+    res.status(500).json({ error: 'Failed to initiate call' });
   }
 }
 

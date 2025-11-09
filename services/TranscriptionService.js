@@ -1,24 +1,65 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { SpeechClient } from '@google-cloud/speech';
 import axios from 'axios';
 
 class TranscriptionService {
   constructor() {
-    this.client = new GoogleGenAI({});
+    this.geminiClient = new GoogleGenerativeAI(process.env.GEMINI_KEY);
+    this.speechClient = new SpeechClient();
   }
 
   async transcribeAudio(url) {
-    // For simplicity, we can download the recording and send it to Gemini
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-    const audioBuffer = Buffer.from(response.data, 'binary');
+    // 1. FIX: Append .wav to the URL to get the actual media file
+    const downloadUrl = `${url}.wav`;
+    console.log(`Downloading audio from: ${downloadUrl}`);
 
-    const transcript = await this.client.audioTranscription(audioBuffer);
-    return transcript;
+    // 2. FIX: Add 'auth' to the axios request
+    const response = await axios.get(downloadUrl, {
+      responseType: 'arraybuffer',
+      auth: {
+        username: process.env.TWILIO_SID,
+        password: process.env.TWILIO_AUTH_TOKEN
+      }
+    });
+
+    const audioBuffer = response.data;
+    const audio = {
+      content: audioBuffer.toString('base64'),
+    };
+    
+    const config = {
+      encoding: 'LINEAR16',
+      sampleRateHertz: 8000,
+      languageCode: 'en-US',
+      model: 'phone_call',
+    };
+    
+    const request = {
+      audio: audio,
+      config: config,
+    };
+
+    const [speechResponse] = await this.speechClient.recognize(request);
+    const transcription = speechResponse.results
+      .map(result => result.alternatives[0].transcript)
+      .join('\n');
+      
+    console.log(`Transcription: ${transcription}`);
+    return transcription;
   }
 
   async analyzeSentiment(transcript) {
-    const prompt = `Classify this text as "good", "neutral", or "bad": "${transcript}"`;
-    const result = await this.client.chatCompletion(prompt);
-    return result.trim().toLowerCase(); // ensures it's one of the three
+    const model = this.geminiClient.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const prompt = `Classify the sentiment of this customer feedback as "good", "neutral", or "bad". Respond with only one of those three words. Feedback: "${transcript}"`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    
+    const sentiment = text.trim().toLowerCase().replace(/[^a-z]/g, '');
+    
+    console.log(`Sentiment: ${sentiment}`);
+    return sentiment || 'neutral';
   }
 }
 
