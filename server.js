@@ -2,8 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-// Swagger Imports
+import { startSentimentCron } from './SentimentCron.js';// Swagger Imports
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 
@@ -58,4 +57,5 @@ app.listen(PORT, () => {
   if(process.env.BASE_URL) {
     console.log(`Swagger UI (public): ${process.env.BASE_URL}/api-docs`);
   }
+  startSentimentCron();
 });
