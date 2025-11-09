@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Bell,
   DownloadCloud,
@@ -31,11 +31,13 @@ function normalizePhoneNumber(input: string): string {
   return trimmed.replace(/\D/g, '');
 }
 
+function formatMonthLabel(date: Date): string {
+  return `${date.toLocaleString('en-US', { month: 'short' })} ${date.getFullYear()}`;
+}
+
 function getMonthLabelFromISO(dateStr: string): string {
-  // dateStr expected: YYYY-MM-DD
   const d = new Date(dateStr);
-  const monthAbbr = d.toLocaleString('en-US', { month: 'short' });
-  return `${monthAbbr} ${d.getFullYear()}`;
+  return formatMonthLabel(d);
 }
 
 function getMonthDayLabelFromISO(dateStr: string): string {
@@ -44,32 +46,53 @@ function getMonthDayLabelFromISO(dateStr: string): string {
   return `${monthAbbr} ${d.getDate()}`;
 }
 
-// --- SENTIMENT/GAUGE DUMMY DATA ---
-const sentimentStats = [
-  {
-    title: "Direct Sentiment",
-    positive: 65,
-    neutral: 18,
-    negative: 17,
-    colors: ["#70FF99", "#FDD657", "#CC0000"], // green, yellow, dark red
-  },
-  {
-    title: "Indirect Sentiment",
-    positive: 47,
-    neutral: 31,
-    negative: 22,
-    colors: ["#70FF99", "#FDD657", "#CC0000"],
-  },
-  {
-    title: "Total Customer Sentiment",
-    positive: 55,
-    neutral: 25,
-    negative: 20,
-    colors: ["#70FF99", "#FDD657", "#CC0000"],
-  },
-];
+const DEFAULT_MONTHS = ['Oct 2025', 'Nov 2025'];
 
-// (moved below)
+type CustomerRow = {
+  id: number;
+  name: string;
+  phone: string;
+  date: string;
+  level: string;
+  country: string;
+  monthLabel: string;
+};
+
+type ActionableInsight = {
+  id: number;
+  type: 'survey' | 'social';
+  sentiment: string;
+  text: string;
+  insight: string | null;
+  created_at: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+};
+
+type TrendSeries = {
+  topic: string;
+  points: { date: string; value: number }[];
+};
+
+type SurveyResponse = {
+  id: number;
+  customer_name: string | null;
+  customer_phone: string | null;
+  sentiment: string;
+  transcript: string | null;
+  insight: string | null;
+  created_at: string;
+};
+
+type SocialPost = {
+  id: number;
+  platform: string;
+  text_content: string;
+  sentiment: string;
+  insight: string | null;
+  post_url: string | null;
+  created_at: string;
+};
 
 const sentimentLegend = [
   { label: "Positive", color: "#70FF99" },
@@ -77,225 +100,29 @@ const sentimentLegend = [
   { label: "Negative", color: "#CC0000" },
 ];
 
-// ------------- SENTIMENT OVER TIME DUMMY DATA SYSTEM 2025 -------------
-// Utility to generate dummy sentiment trend data for 2025 by month
-function makeTrend(month: number, year = 2025): { date: string, value: number }[] {
-  const now = new Date();
-  const isCurrentMonth = (year === now.getFullYear() && month === now.getMonth());
-  const numDaysInMonth = new Date(year, month + 1, 0).getDate();
-  const lastDay = isCurrentMonth ? now.getDate() : numDaysInMonth;
-  // For current month: daily points up to today. Others: every ~4 days (1,5,9,...), capped to month length.
-  const baseDays = isCurrentMonth
-    ? Array.from({ length: lastDay }, (_, i) => i + 1)
-    : [1, 5, 9, 13, 17, 21, 25, 30].filter(d => d <= lastDay);
-  return baseDays.map(d => ({
-    date: `${new Date(year, month, d).toLocaleString('default', { month: 'short' })} ${d}`,
-    value: 70 + Math.floor(Math.random() * 21) // 70-90%
-  }));
-}
-const MONTH_LIST_2025 = [
-  'Jan 2025','Feb 2025','Mar 2025','Apr 2025','May 2025','Jun 2025','Jul 2025','Aug 2025','Sep 2025','Oct 2025','Nov 2025','Dec 2025',
-];
-const chartMonthlyData: Record<string, { date: string, value: number }[]> = {};
-const chartMonths = MONTH_LIST_2025;
-
-// (moved below originalCustomers)
-
-// Device time
-const getTodayMonthLabel = () => {
-  const now = new Date();
-  // Use en-US locale to ensure consistent month abbreviation format
-  const monthAbbr = now.toLocaleString('en-US', { month: 'short' });
-  const year = now.getFullYear();
-  const monthLabel = `${monthAbbr} ${year}`;
-  // If the current month is in chartMonths, use it; otherwise default to first month (Jan 2025)
-  return chartMonths.includes(monthLabel) ? monthLabel : chartMonths[0];
-};
-const getTodayLabel = () => {
-  const now = new Date();
-  return `${now.toLocaleString('default',{month:'short'})} ${now.getDate()}`;
-};
-
-// --- CALL CUSTOMERS DUMMY DATA ---
-const originalCustomers = [
+const defaultSentimentStats = [
   {
-    order: "#10000",
-    name: "Alex Murphy",
-    email: "alexmurphy@email.com",
-    date: "Jan 5, 2025",
-    level: "Amplified",
-    country: "Germany",
-    phone: "+49 1512 1234567",
+    title: "Direct Sentiment",
+    positive: 0,
+    neutral: 0,
+    negative: 0,
+    colors: ["#70FF99", "#FDD657", "#CC0000"],
   },
   {
-    order: "#10001",
-    name: "Priya Patel",
-    email: "priya.patel@email.com",
-    date: "Feb 9, 2025",
-    level: "All In",
-    country: "India",
-    phone: "+91 90457 00001",
+    title: "Indirect Sentiment",
+    positive: 0,
+    neutral: 0,
+    negative: 0,
+    colors: ["#70FF99", "#FDD657", "#CC0000"],
   },
   {
-    order: "#10002",
-    name: "Veronica Lee",
-    email: "veronical@email.com",
-    date: "Mar 17, 2025",
-    level: "Rely",
-    country: "USA",
-    phone: "+1 208 404 4040",
-  },
-  {
-    order: "#10003",
-    name: "Ben Singh",
-    email: "bens@email.com",
-    date: "Apr 1, 2025",
-    level: "Amplified",
-    country: "UK",
-    phone: "+44 7911 777888",
-  },
-  {
-    order: "#10004",
-    name: "Maria Garcia",
-    email: "mariag@email.com",
-    date: "May 9, 2025",
-    level: "All In",
-    country: "Spain",
-    phone: "+34 600 123456",
-  },
-  {
-    order: "#10005",
-    name: "Anders Olsen",
-    email: "anders.olsen@email.com",
-    date: "Jun 13, 2025",
-    level: "Amplified",
-    country: "Denmark",
-    phone: "+45 2012 3456",
-  },
-  {
-    order: "#1520",
-    name: "John Carter",
-    email: "hello@johncarter.com",
-    date: "Jan 30, 2025",
-    level: "All In",
-    country: "United States",
-    phone: "+1 (823) 750-2356",
-  },
-  {
-    order: "#1531",
-    name: "Sophie Moore",
-    email: "contact@sophiemoore.com",
-    date: "Feb 27, 2025",
-    level: "Amplified",
-    country: "United Kingdom",
-    phone: "+44 (823)-950-2330",
-  },
-  {
-    order: "#1530",
-    name: "Matt Cannon",
-    email: "info@mattcannon.com",
-    date: "Mar 24, 2025",
-    level: "All In",
-    country: "Australia",
-    phone: "+61 (213)-540-2492",
-  },
-  {
-    order: "#1539",
-    name: "Graham Hilda",
-    email: "hilda@vharris.co",
-    date: "Apr 21, 2025",
-    level: "Rely",
-    country: "India",
-    phone: "+91 (823) 750-2356",
-  },
-  {
-    order: "#1538",
-    name: "Sandy Houston",
-    email: "contact@sandyhouston.com",
-    date: "May 18, 2025",
-    level: "All In",
-    country: "Canada",
-    phone: "+1 (832)-554-3432",
-  },
-  {
-    order: "#1537",
-    name: "Andy Smith",
-    email: "hello@andysmith.com",
-    date: "Jun 16, 2025",
-    level: "Rely",
-    country: "United States",
-    phone: "+1 (823)-240-2330",
-  },
-  {
-    order: "#1555",
-    name: "Mani Verma",
-    email: "maniverma@tmobile.com",
-    date: "May 17, 2025",
-    level: "Amplified",
-    country: "India",
-    phone: "+91 88547 23011",
-  },
-  {
-    order: "#1566",
-    name: "Poppy Wright",
-    email: "pwright@metro.com",
-    date: "May 11, 2025",
-    level: "All In",
-    country: "USA",
-    phone: "+1 672-212-8723",
+    title: "Total Customer Sentiment",
+    positive: 0,
+    neutral: 0,
+    negative: 0,
+    colors: ["#70FF99", "#FDD657", "#CC0000"],
   },
 ];
-
-// Generate additional dummy customers for all months except the month AFTER the current month
-type Customer = (typeof originalCustomers)[number];
-const nextMonthLabel = (() => {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const monthAbbr = next.toLocaleString('en-US', { month: 'short' });
-  return `${monthAbbr} ${next.getFullYear()}`;
-})();
-const generatedCustomers: Customer[] = [];
-MONTH_LIST_2025.forEach((label, idx) => {
-  if (label === nextMonthLabel) return; // skip next month
-  const [monAbbr, yearStr] = label.split(' ');
-  const year = parseInt(yearStr, 10);
-  const monthIndex = idx; // aligned with MONTH_LIST_2025
-  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const dayA = Math.min(12, daysInMonth);
-  const dayB = Math.min(24, daysInMonth);
-  const baseOrder = 20000 + idx * 10;
-  generatedCustomers.push(
-    {
-      order: `#${baseOrder}`,
-      name: `Dummy User ${idx + 1}A`,
-      email: `dummy${idx + 1}a@example.com`,
-      date: `${monAbbr} ${dayA}, ${year}`,
-      level: ["Rely","Amplified","All In"][idx % 3],
-      country: ["USA","India","Germany","UK","Canada"][idx % 5],
-      phone: "+1 555-000-0000",
-    },
-    {
-      order: `#${baseOrder + 1}`,
-      name: `Dummy User ${idx + 1}B`,
-      email: `dummy${idx + 1}b@example.com`,
-      date: `${monAbbr} ${dayB}, ${year}`,
-      level: ["Rely","Amplified","All In"][ (idx + 1) % 3],
-      country: ["USA","India","Germany","UK","Canada"][ (idx + 2) % 5],
-      phone: "+1 555-000-0001",
-    }
-  );
-});
-// Set first dummy user for November 2025 to specific phone number
-(() => {
-  const novIdx = MONTH_LIST_2025.indexOf('Nov 2025');
-  if (novIdx >= 0) {
-    const arrIdx = novIdx * 2; // A entry
-    if (generatedCustomers[arrIdx]) {
-      generatedCustomers[arrIdx].phone = "+1 832 759 3256";
-    }
-  }
-})();
-const initialAllCustomers: Customer[] = [...originalCustomers, ...generatedCustomers];
 
 const levelColorClasses: Record<string, string> = {
   "Rely": "bg-blue-600 text-white",
@@ -308,35 +135,49 @@ export default function DashboardPage() {
   
   
   // --- State ---
-  // Month - default to first month with data (Jan 2025) if current month not available
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const todayLabel = getTodayMonthLabel();
-    return chartMonths.includes(todayLabel) ? todayLabel : chartMonths[0];
-  });
-  // Trend data (stateful to allow adding 'now')
-  const [trend, setTrend] = useState<{ [k: string]: { date: string, value: number }[] }>(chartMonthlyData);
-  // Sentiment stats (stateful so backend can update)
-  const [sentimentStatsData, setSentimentStatsData] = useState(sentimentStats);
-  // Customers (stateful to load from backend)
-  const [allCustomers, setAllCustomers] = useState<Customer[]>(initialAllCustomers);
-  // Insights state - FIFO list (newest first)
-  const [insights, setInsights] = useState<{ id: number; text: string; completed: boolean }[]>([]);
-  const [insightCounter, setInsightCounter] = useState(0);
-  // Current highlight: today's date label
-  const todayLabel = getTodayLabel();
-  const isCurrMonth = selectedMonth === getTodayMonthLabel();
-  // User name (no auth integration)
-  const userName = "User";
-  // Sentiment modal
+  const currentMonthLabel = useMemo(() => formatMonthLabel(new Date()), []);
+  const initialMonths = useMemo(() => {
+    const seed = new Set(DEFAULT_MONTHS);
+    if (currentMonthLabel) {
+      seed.add(currentMonthLabel);
+    }
+    return Array.from(seed);
+  }, [currentMonthLabel]);
+
+  const [chartMonths, setChartMonths] = useState<string[]>(initialMonths);
+  const [selectedMonth, setSelectedMonth] = useState<string>(() =>
+    initialMonths.includes(currentMonthLabel) ? currentMonthLabel : initialMonths[0]
+  );
+  const [trend, setTrend] = useState<Record<string, { date: string; value: number }[]>>({});
+  const [sentimentStatsData, setSentimentStatsData] = useState(defaultSentimentStats);
+  const [allCustomers, setAllCustomers] = useState<CustomerRow[]>([]);
+  const [selectedRows, setSelectedRows] = useState<Record<number, boolean>>({});
+  const [actionableInsights, setActionableInsights] = useState<ActionableInsight[]>([]);
+  const [trendsData, setTrendsData] = useState<TrendSeries[]>([]);
+  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
+  const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
+  const [resolvingInsightId, setResolvingInsightId] = useState<number | null>(null);
   const [openSentiment, setOpenSentiment] = useState<{title: string, positive: number, neutral: number, negative: number} | null>(null);
-  
-  // Check if selected month is in the future
+
+  const todayLabel = useMemo(() => {
+    const now = new Date();
+    return `${now.toLocaleString('default',{month:'short'})} ${now.getDate()}`;
+  }, []);
+
+  const isCurrMonth = selectedMonth === currentMonthLabel;
   const now = new Date();
   const [selMonthName, selYearStr] = selectedMonth.split(' ');
-  const selYear = parseInt(selYearStr, 10);
+  const selYear = parseInt(selYearStr ?? `${now.getFullYear()}`, 10);
   const selMonthIndex = chartMonths.indexOf(selectedMonth);
-  const isFutureMonth = selYear > now.getFullYear() || 
+  const isFutureMonth =
+    selYear > now.getFullYear() ||
     (selYear === now.getFullYear() && selMonthIndex > now.getMonth());
+
+  const userName = "User";
+
+  useEffect(() => {
+    setSelectedRows({});
+  }, [selectedMonth]);
 
   // Effect removed: No simulated data points; rely solely on backend data
 
@@ -385,6 +226,44 @@ export default function DashboardPage() {
     return () => { isMounted = false; clearInterval(id); };
   }, []);
 
+  const fetchActionableInsights = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/dashboard/actionable-insights`);
+      if (!res.ok) return;
+      const data: ActionableInsight[] = await res.json();
+      setActionableInsights(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to load actionable insights", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchActionableInsights();
+  }, [fetchActionableInsights]);
+
+  const handleResolveInsight = useCallback(async (insight: ActionableInsight) => {
+    try {
+      setResolvingInsightId(insight.id);
+      const res = await fetch(`${API_BASE_URL}/api/sentiments/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: insight.type, id: insight.id }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(message);
+      }
+      setActionableInsights(prev =>
+        prev.filter(item => !(item.id === insight.id && item.type === insight.type))
+      );
+    } catch (err) {
+      console.error("Failed to resolve insight", err);
+      alert("Failed to mark insight as resolved. Please try again.");
+    } finally {
+      setResolvingInsightId(null);
+    }
+  }, []);
+
   // Effect: Fetch sentiment-over-time and map into month buckets
   useEffect(() => {
     let isMounted = true;
@@ -395,13 +274,24 @@ export default function DashboardPage() {
         const data: { date: string; good_percent: number }[] = await res.json();
         if (!isMounted) return;
         const bucket: { [k: string]: { date: string, value: number }[] } = {};
+        const monthLabels = new Set<string>();
         data.forEach(pt => {
           const monthLabel = getMonthLabelFromISO(pt.date);
+          monthLabels.add(monthLabel);
           const dayLabel = getMonthDayLabelFromISO(pt.date);
           if (!bucket[monthLabel]) bucket[monthLabel] = [];
           bucket[monthLabel].push({ date: dayLabel, value: pt.good_percent });
         });
         setTrend(prev => ({ ...prev, ...bucket }));
+        setChartMonths(prev => {
+          const next = new Set(prev);
+          monthLabels.forEach(label => next.add(label));
+          const arr = Array.from(next);
+          if (!arr.includes(selectedMonth) && arr.length > 0) {
+            setSelectedMonth(arr[0]);
+          }
+          return arr;
+        });
       } catch (e) {
         // silent
       }
@@ -409,6 +299,77 @@ export default function DashboardPage() {
     fetchTrend();
     // no polling required here unless needed
     return () => { isMounted = false; };
+  }, []);
+
+  // Effect: Fetch Google Trends formatted data
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchTrends() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/trends`);
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (!isMounted) return;
+        const parsed: TrendSeries[] = Object.entries(payload || {}).map(
+          ([topic, values]: [string, any]) => ({
+            topic,
+            points: Array.isArray(values)
+              ? values.map((v: any) => ({
+                  date: v.date,
+                  value: typeof v.value === 'number' ? v.value : Number(v.value) || 0,
+                }))
+              : [],
+          })
+        );
+        setTrendsData(parsed);
+      } catch (e) {
+        console.error("Failed to load trends data", e);
+      }
+    }
+    fetchTrends();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Effect: Fetch survey responses
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchSurveys() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/surveys`);
+        if (!res.ok) return;
+        const data: SurveyResponse[] = await res.json();
+        if (!isMounted) return;
+        setSurveyResponses(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error("Failed to load surveys", e);
+      }
+    }
+    fetchSurveys();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Effect: Fetch social posts
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchSocial() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/dashboard/social`);
+        if (!res.ok) return;
+        const data: SocialPost[] = await res.json();
+        if (!isMounted) return;
+        setSocialPosts(Array.isArray(data) ? data : []);
+      } catch (e) {
+        console.error("Failed to load social posts", e);
+      }
+    }
+    fetchSocial();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Effect: Fetch customers and populate Oct/Nov months
@@ -429,7 +390,7 @@ export default function DashboardPage() {
           return Math.max(1, Math.min(daysInMonth, Math.floor(Math.random() * daysInMonth) + 1));
         };
         // Assign half to Oct (index 9) and half to Nov (index 10). Duplicate if only one to fill both.
-        const out: Customer[] = [];
+        const out: CustomerRow[] = [];
         const half = Math.ceil(rows.length / 2);
         const octRows = rows.slice(0, half);
         const novRows = rows.slice(half);
@@ -440,29 +401,39 @@ export default function DashboardPage() {
         octRows.forEach(r => {
           const d = randDay(9);
           out.push({
-            order: String(r.id),
+            id: r.id,
             name: r.name,
-            email: '', // not displayed
             date: `${octMonthAbbr} ${d}, ${yearStr}`,
             level: levels[Math.floor(Math.random() * levels.length)],
             country: countries[Math.floor(Math.random() * countries.length)],
             phone: r.phone,
-          } as Customer);
+            monthLabel: `${octMonthAbbr} ${yearStr}`,
+          });
         });
         const novSource = novRows.length > 0 ? novRows : rows.slice(0, Math.max(1, Math.min(3, rows.length)));
         novSource.forEach(r => {
           const d = randDay(10);
           out.push({
-            order: String(r.id),
+            id: r.id,
             name: r.name,
-            email: '',
             date: `${novMonthAbbr} ${d}, ${yearStr}`,
             level: levels[Math.floor(Math.random() * levels.length)],
             country: countries[Math.floor(Math.random() * countries.length)],
             phone: r.phone,
-          } as Customer);
+            monthLabel: `${novMonthAbbr} ${yearStr}`,
+          });
         });
         setAllCustomers(out);
+        setSelectedRows({});
+        setChartMonths(prev => {
+          const monthSet = new Set(prev);
+          out.forEach(c => monthSet.add(c.monthLabel));
+          const monthsArray = Array.from(monthSet);
+          if (!monthsArray.includes(selectedMonth) && monthsArray.length > 0) {
+            setSelectedMonth(monthsArray[0]);
+          }
+          return monthsArray;
+        });
       } catch (e) {
         // silent
       }
@@ -487,16 +458,13 @@ export default function DashboardPage() {
   }
 
   // --- CUSTOMER TABLE (Filtered by Month) ---
-  const monthFilterLabel = selectedMonth.split(" ")[0].toLowerCase(); // e.g. "jan"
-  const customersInMonth = allCustomers.filter((c: Customer) => {
-    const customerMonth = c.date.split(" ")[0].toLowerCase(); // e.g. "jan" from "Jan 5, 2025"
-    return customerMonth === monthFilterLabel;
-  });
-  // --- Row Selection State ---
-  const [selectedRows, setSelectedRows] = useState<{ [order: string]: boolean }>({});
+  const customersInMonth = allCustomers.filter(c => c.monthLabel === selectedMonth);
   // Helper for Select All state
-  const allChecked = customersInMonth.length > 0 && customersInMonth.every((c: Customer) => selectedRows[c.order]);
-  const someChecked = !allChecked && customersInMonth.some((c: Customer) => selectedRows[c.order]);
+  const allChecked =
+    customersInMonth.length > 0 &&
+    customersInMonth.every(c => selectedRows[c.id]);
+  const someChecked =
+    !allChecked && customersInMonth.some(c => selectedRows[c.id]);
 
   // --- Handlers ---
   const handleExport = (): void => alert("Export data");
@@ -506,13 +474,13 @@ export default function DashboardPage() {
     // Randomly select 5 in current filtered list
     const shuffled = [...customersInMonth].sort(() => 0.5 - Math.random());
     const picked = shuffled.slice(0, 5);
-    const newSel: { [order: string]: boolean } = {};
-    picked.forEach((c: Customer) => (newSel[c.order] = true));
+    const newSel: Record<number, boolean> = {};
+    picked.forEach(c => (newSel[c.id] = true));
     setSelectedRows(newSel);
   };
 
   const handleMakeCall = async () => {
-    const toCall = customersInMonth.filter((c: Customer) => selectedRows[c.order]);
+    const toCall = customersInMonth.filter(c => selectedRows[c.id]);
     if (toCall.length === 0) {
       alert("Please select customer(s) to call.");
       return;
@@ -555,30 +523,15 @@ export default function DashboardPage() {
   const handleEdit = (name: string): void => alert(`Edit ${name}`);
   const handleDelete = (name: string): void => alert(`Delete ${name}`);
   
-  // Insights handlers
-  const handleAddInsight = () => {
-    const newInsight = {
-      id: insightCounter,
-      text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-      completed: false,
-    };
-    setInsights([newInsight, ...insights]); // Add to front (FIFO)
-    setInsightCounter(insightCounter + 1);
-  };
-  
-  const handleToggleInsight = (id: number) => {
-    setInsights(insights.map(ins => ins.id === id ? { ...ins, completed: !ins.completed } : ins));
-  };
-  const handleDeleteInsight = (id: number) => {
-    setInsights(insights.filter(ins => ins.id !== id));
-  };
   // Row selection
-  const toggleRow = (order: string) => {
-    setSelectedRows((prev) => ({ ...prev, [order]: !prev[order] }));
+  const toggleRow = (customerId: number) => {
+    setSelectedRows(prev => ({ ...prev, [customerId]: !prev[customerId] }));
   };
   const setAllRows = (checked: boolean) => {
-    const sel: { [order: string]: boolean } = {};
-    customersInMonth.forEach((c: Customer) => (sel[c.order] = checked));
+    const sel: Record<number, boolean> = {};
+    customersInMonth.forEach(c => {
+      sel[c.id] = checked;
+    });
     setSelectedRows(sel);
   };
   // --- Sentiment arc util ---
@@ -626,34 +579,52 @@ export default function DashboardPage() {
         <div className="w-full mt-1 flex-1 flex flex-col">
           <h3 className="text-[#ED008C] text-lg font-semibold mb-3 px-2">Insights</h3>
           <div className="flex-1 overflow-y-auto space-y-2 px-2">
-            {insights.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center mt-4">No insights yet</p>
+            {actionableInsights.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center mt-4">No actionable insights pending.</p>
             ) : (
-              insights.map((insight) => (
+              actionableInsights.map((insight) => (
                 <div
-                  key={insight.id}
+                  key={`${insight.type}-${insight.id}`}
                   className="bg-pink-50 border border-pink-100 rounded-lg p-3 shadow-sm"
                 >
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={insight.completed}
-                      onChange={() => handleToggleInsight(insight.id)}
-                      className="mt-1 w-4 h-4 accent-[#ED008C] cursor-pointer flex-shrink-0"
-                    />
-                    <p className={`text-gray-700 text-xs leading-relaxed ${
-                      insight.completed ? 'line-through opacity-60' : ''
-                    }`}>
-                      {insight.text}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-[#ED008C] uppercase">
+                        {insight.type}
+                      </span>
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          insight.sentiment === 'good'
+                            ? 'bg-green-100 text-green-700'
+                            : insight.sentiment === 'neutral'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        {insight.sentiment}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-xs leading-relaxed">
+                      {insight.insight || insight.text}
                     </p>
+                    {insight.customer_name && (
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        {insight.customer_name}
+                        {insight.customer_phone ? ` • ${insight.customer_phone}` : ""}
+                      </p>
+                    )}
                   </div>
-                  <div className="mt-2 pl-6">
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-[11px] text-gray-400">
+                      {new Date(insight.created_at).toLocaleString()}
+                    </span>
                     <button
-                      onClick={() => handleDeleteInsight(insight.id)}
-                      className="text-[#ED008C] hover:opacity-90 text-xs font-medium flex items-center gap-1"
-                      aria-label="Delete insight"
+                      onClick={() => handleResolveInsight(insight)}
+                      disabled={resolvingInsightId === insight.id}
+                      className="text-[#ED008C] hover:opacity-90 text-xs font-medium flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      <Trash2 size={14} /> Delete
+                      <Trash2 size={14} />
+                      Mark Resolved
                     </button>
                   </div>
                 </div>
@@ -953,22 +924,22 @@ export default function DashboardPage() {
                       No customers for this month.
                     </td>
                   </tr>
-                ) : customersInMonth.map((customer, idx) => (
+                ) : customersInMonth.map((customer) => (
                   <tr
-                    key={customer.order}
+                    key={customer.id}
                     className={`even:bg-pink-600/40 odd:bg-pink-500/70 border-y border-pink-400/25`}
                   >
                     <td className="px-2 py-3 text-center">
                       <input
                         type="checkbox"
-                        checked={!!selectedRows[customer.order]}
-                        onChange={() => toggleRow(customer.order)}
+                        checked={!!selectedRows[customer.id]}
+                        onChange={() => toggleRow(customer.id)}
                         className="accent-pink-500 w-4 h-4 border rounded"
                         aria-label={`Select ${customer.name}`}
                       />
                     </td>
                     <td className="px-2 py-3 font-bold text-white text-sm">
-                      {customer.order}
+                      {customer.id}
                     </td>
                     <td className="px-2 py-3">
                       <div className="flex flex-col">
@@ -1015,6 +986,136 @@ export default function DashboardPage() {
             </table>
           </div>
         </Card>
+
+        {/* Additional Data Sections */}
+        <section className="mx-10 grid gap-6 mb-10 lg:grid-cols-3 sm:grid-cols-1">
+          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
+            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Google Trend Topics</h3>
+            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
+              {trendsData.length === 0 ? (
+                <p className="text-sm text-gray-500">No trend data available.</p>
+              ) : (
+                trendsData.map(series => {
+                  const latest = series.points.at(-1);
+                  return (
+                    <div key={series.topic} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-[#ED008C]">
+                          {series.topic}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {latest ? latest.date : ''}
+                        </span>
+                      </div>
+                      <div className="mt-1">
+                        <span className="text-2xl font-bold text-[#ED008C]">
+                          {latest ? Math.round(latest.value) : '--'}
+                        </span>
+                        <span className="text-xs text-gray-500 ml-1">score</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+
+          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
+            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Latest Social Mentions</h3>
+            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
+              {socialPosts.length === 0 ? (
+                <p className="text-sm text-gray-500">No social posts ingested yet.</p>
+              ) : (
+                socialPosts.slice(0, 6).map(post => (
+                  <div key={post.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold uppercase text-[#ED008C]">
+                        {post.platform}
+                      </span>
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          post.sentiment === 'good'
+                            ? 'bg-green-100 text-green-700'
+                            : post.sentiment === 'neutral'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        {post.sentiment}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-700 leading-relaxed line-clamp-4">
+                      {post.text_content}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] text-gray-400">
+                        {new Date(post.created_at).toLocaleString()}
+                      </span>
+                      {post.post_url && (
+                        <a
+                          href={post.post_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-medium text-[#ED008C] hover:underline"
+                        >
+                          View
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card className="bg-white border border-[#ED008C]/30 rounded-xl shadow-[0_10px_28px_rgba(0,0,0,0.12)] p-4">
+            <h3 className="text-[#ED008C] font-semibold text-lg mb-3">Recent Survey Responses</h3>
+            <div className="space-y-3 max-h-[240px] overflow-y-auto pr-1">
+              {surveyResponses.length === 0 ? (
+                <p className="text-sm text-gray-500">No survey responses available.</p>
+              ) : (
+                surveyResponses.slice(0, 6).map(response => (
+                  <div key={response.id} className="border border-pink-100 rounded-lg p-3 bg-pink-50">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-semibold text-[#ED008C]">
+                          {response.customer_name || "Unknown Customer"}
+                        </span>
+                        {response.customer_phone && (
+                          <span className="text-xs text-gray-500 block">
+                            {response.customer_phone}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                          response.sentiment === 'good'
+                            ? 'bg-green-100 text-green-700'
+                            : response.sentiment === 'neutral'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        {response.sentiment}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-700 leading-relaxed line-clamp-4">
+                      {response.transcript || "No transcript provided."}
+                    </p>
+                    {response.insight && (
+                      <p className="mt-2 text-[11px] text-gray-500 italic">
+                        Insight: {response.insight}
+                      </p>
+                    )}
+                    <span className="text-[11px] text-gray-400 block mt-2">
+                      {new Date(response.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </section>
       </main>
 
       {openSentiment && (
@@ -1046,12 +1147,12 @@ export default function DashboardPage() {
         </div>
       )}
       
-      {/* Add Insight Button - Bottom Left */}
+      {/* Refresh Insights Button - Bottom Left */}
       <button
-        onClick={handleAddInsight}
+        onClick={fetchActionableInsights}
         className="fixed bottom-6 left-6 bg-[#ED008C] text-white font-semibold text-sm rounded-lg px-4 py-2 shadow-lg hover:opacity-90 transition flex items-center gap-2"
       >
-        <span className="text-lg">+</span> Add Insight
+        <span className="text-lg">↻</span> Refresh Insights
       </button>
     </div>
   );
