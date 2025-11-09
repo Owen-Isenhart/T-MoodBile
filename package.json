@@ -18,6 +18,8 @@
     "nodemailer": "^7.0.10",
     "postgres": "^3.4.7",
     "resend": "^6.4.2",
+    "sentiment": "^5.0.2",
+    "serpapi": "^2.2.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "twilio": "^5.10.4"
