@@ -1,12 +1,12 @@
 import Twilio from 'twilio';
 import TTSService from '../services/TTSService.js';
-import TranscriptionService from '../services/TranscriptionService.js';
+import AiAnalysisService from '../services/AiAnalysisService.js';
 import SurveyResponse from '../models/SurveyResponse.js';
 import CallLog from '../models/CallLog.js';
 import Customer from '../models/Customer.js';
 
 const ttsService = new TTSService(process.env.ELEVENLABS_KEY);
-const transcriptionService = new TranscriptionService();
+const transcriptionService = new AiAnalysisService();
 
 // 1. Generate TwiML instructions for Twilio
 async function generateTwiML(req, res) {

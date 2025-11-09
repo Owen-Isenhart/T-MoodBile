@@ -1,20 +1,24 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { startSentimentCron } from './SentimentCron.js';// Swagger Imports
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import sentimentRoutes from './routes/sentimentRoutes.js';
+import { startTrendsCron } from './trendsCron.js';
+import { startRedditCron } from './redditCron.js';
 import callRoutes from './routes/callRoutes.js';
 import twilioRoutes from './routes/twilioRoutes.js';
-import customerRoutes from './routes/customerRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 // ES Module fix for __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -50,8 +54,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 app.use('/api/calls', callRoutes);
 app.use('/api/twilio', twilioRoutes);
 app.use('/api/sentiments', sentimentRoutes);
-app.use('/api/customers', customerRoutes);
-
+app.use('/api/dashboard', dashboardRoutes);
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -61,4 +64,6 @@ app.listen(PORT, () => {
     console.log(`Swagger UI (public): ${process.env.BASE_URL}/api-docs`);
   }
   startSentimentCron();
+  startTrendsCron();
+  startRedditCron();
 });
