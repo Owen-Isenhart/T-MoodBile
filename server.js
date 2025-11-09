@@ -7,6 +7,7 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import sentimentRoutes from './routes/sentimentRoutes.js';
 import { startTrendsCron } from './trendsCron.js';
+import { startRedditCron } from './redditCron.js';
 import callRoutes from './routes/callRoutes.js';
 import twilioRoutes from './routes/twilioRoutes.js';
 
@@ -61,4 +62,5 @@ app.listen(PORT, () => {
   }
   startSentimentCron();
   startTrendsCron();
+  startRedditCron();
 });
