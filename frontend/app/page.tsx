@@ -459,7 +459,7 @@ export default function DashboardPage() {
         octRows.forEach(r => {
           const d = randDay(9);
           out.push({
-            order: `#${r.id}`,
+            order: String(r.id),
             name: r.name,
             email: '', // not displayed
             date: `${octMonthAbbr} ${d}, ${yearStr}`,
@@ -472,7 +472,7 @@ export default function DashboardPage() {
         novSource.forEach(r => {
           const d = randDay(10);
           out.push({
-            order: `#${r.id}`,
+            order: String(r.id),
             name: r.name,
             email: '',
             date: `${novMonthAbbr} ${d}, ${yearStr}`,
@@ -943,7 +943,7 @@ export default function DashboardPage() {
                     />
                   </th>
                   <th className="px-2 py-2 text-white text-xs font-semibold">
-                    Order
+                    ID
                   </th>
                   <th className="px-2 py-2 text-white text-xs font-semibold">
                     Client
