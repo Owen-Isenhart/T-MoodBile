@@ -1,6 +1,5 @@
 const axios = require('axios');
 
-
 axios.get('https://jsonplaceholder.typicode.com/todos/1')
   .then(response => {
     console.log('Axios Test Response:', response.data); 
@@ -44,6 +43,5 @@ const checkUptime = async () => {
     console.error('Error fetching data:', error);
   }
 };
-
 
 checkUptime();
