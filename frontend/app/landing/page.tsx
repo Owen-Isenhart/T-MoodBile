@@ -20,6 +20,11 @@ export default function LandingPage() {
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState('');
 
+  // --- Email input ---
+  const [email, setEmail] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [emailError, setEmailError] = useState('');
+
   // Bouncing and collision logic
   useEffect(() => {
     const interval = setInterval(() => {
@@ -55,12 +60,21 @@ export default function LandingPage() {
   }, []);
 
   const handleGetStarted = () => {
+    let err = '';
     if (!userName.trim()) {
       setTouched(true);
-      setError('Please enter your name to continue.');
-      return;
+      err = 'Please enter your name to continue.';
     }
+    // Simple email valid check
+    if (!email.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      setEmailTouched(true);
+      setEmailError('Enter a valid email address to continue.');
+      if (!err) err = ' '; // block submit
+    }
+    setError(err);
+    if (err) return;
     localStorage.setItem('tmoodbile_user_name', userName.trim());
+    // Ignore the email value afterward per request
     router.push("/");
   };
 
@@ -96,11 +110,11 @@ export default function LandingPage() {
           <h2 className="text-3xl font-bold text-gray-800 mb-4">
             Customer Sentiment Analysis Platform
           </h2>
-          <p className="text-lg text-gray-600 leading-relaxed mb-4">
-            Transform customer feedback into actionable insights with our real-time sentiment analysis dashboard.
+          <p className="text-lg text-gray-600 leading-relaxed mb-0">
+            Transform customer satisfaction with actionable insights on our real-time sentiment analysis dashboard.
           </p>
         </div>
-        {/* Name Input */}
+        {/* Name & Email Inputs */}
         <form onSubmit={e => { e.preventDefault(); handleGetStarted(); }} className="flex flex-col items-center w-full max-w-xs mb-7">
           <input
             type="text"
@@ -111,13 +125,24 @@ export default function LandingPage() {
             onBlur={() => { setTouched(true); if (!userName.trim()) setError('Please enter your name to continue.'); }}
             autoFocus
           />
-          {error && touched && (
+          <input
+            type="email"
+            className={`w-full px-4 py-2 border ${emailError ? 'border-red-400' : 'border-pink-300'} rounded text-lg focus:border-[#ED008C] outline-none mb-2`}
+            placeholder="Enter your email"
+            value={email}
+            onChange={e => { setEmail(e.target.value); setEmailError(''); }}
+            onBlur={() => { setEmailTouched(true); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) setEmailError('Enter a valid email address to continue.'); }}
+          />
+          {(error && touched) && (
             <span className="text-red-500 text-sm mb-1">{error}</span>
+          )}
+          {(emailError && emailTouched) && (
+            <span className="text-red-500 text-sm mb-1">{emailError}</span>
           )}
           <button
             type="submit"
-            disabled={!userName.trim()}
-            className={`bg-[#ED008C] text-white font-bold text-lg rounded-xl px-12 py-4 shadow-xl hover:opacity-90 transition transform hover:scale-105 w-full mt-2${!userName.trim() ? ' opacity-60 cursor-not-allowed' : ''}`}
+            disabled={!userName.trim() || !email.trim() || !!emailError || !!error}
+            className={`bg-[#ED008C] text-white font-bold text-lg rounded-xl px-12 py-4 shadow-xl hover:opacity-90 transition transform hover:scale-105 w-full mt-2${(!userName.trim() || !email.trim() || !!emailError || !!error) ? ' opacity-60 cursor-not-allowed' : ''}`}
           >
             Get Started
           </button>
