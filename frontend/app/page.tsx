@@ -130,6 +130,32 @@ const levelColorClasses: Record<string, string> = {
   "All In": "bg-yellow-400 text-gray-900",
 };
 
+async function fetchJson<T = any>(
+  url: string,
+  options?: RequestInit,
+  label?: string
+): Promise<T | null> {
+  const tag = label ? `[Dashboard] ${label}` : "[Dashboard]";
+  try {
+    const res = await fetch(url, options);
+    const raw = await res.text();
+    console.debug(`${tag} raw response`, raw);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}: ${raw}`);
+    }
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      console.error(`${tag} failed to parse JSON`, err, raw);
+      throw err;
+    }
+  } catch (err) {
+    console.error(`${tag} request failed`, err);
+    throw err;
+  }
+}
+
 // --- MAIN COMPONENT ---
 export default function DashboardPage() {
   
@@ -185,16 +211,20 @@ export default function DashboardPage() {
   useEffect(() => {
     let isMounted = true;
     async function fetchKpis() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/dashboard/kpis`);
-        if (!res.ok) return;
-      const data = await res.json();
-      console.debug("[Dashboard] KPI response", data);
-        if (!isMounted) return;
+      try {
+        const data = await fetchJson<any>(
+          `${API_BASE_URL}/api/dashboard/kpis`,
+          undefined,
+          "KPI"
+        );
+        if (!isMounted || !data) return;
         const direct = data.direct_sentiment_breakdown || {};
         const indirect = data.indirect_sentiment_breakdown || {};
         const totalPos = data.total_customer_sentiment_percent ?? 0;
-        const indirectNeutral = Math.max(0, 100 - (indirect.positive_percent ?? 0) - (indirect.negative_percent ?? 0));
+        const indirectNeutral = Math.max(
+          0,
+          100 - (indirect.positive_percent ?? 0) - (indirect.negative_percent ?? 0)
+        );
         setSentimentStatsData([
           {
             title: "Direct Sentiment",
@@ -219,7 +249,7 @@ export default function DashboardPage() {
           },
         ]);
       } catch (e) {
-        // silent fail
+        console.error("[Dashboard] KPI fetch failed", e);
       }
     }
     fetchKpis();
@@ -229,10 +259,11 @@ export default function DashboardPage() {
 
   const fetchActionableInsights = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/dashboard/actionable-insights`);
-      if (!res.ok) return;
-      const data: ActionableInsight[] = await res.json();
-      console.debug("[Dashboard] Actionable insights response", data);
+      const data = await fetchJson<ActionableInsight[]>(
+        `${API_BASE_URL}/api/dashboard/actionable-insights`,
+        undefined,
+        "Actionable Insights"
+      );
       setActionableInsights(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to load actionable insights", e);
@@ -246,15 +277,15 @@ export default function DashboardPage() {
   const handleResolveInsight = useCallback(async (insight: ActionableInsight) => {
     try {
       setResolvingInsightId(insight.id);
-      const res = await fetch(`${API_BASE_URL}/api/sentiments/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: insight.type, id: insight.id }),
-      });
-      if (!res.ok) {
-        const message = await res.text();
-        throw new Error(message);
-      }
+      await fetchJson(
+        `${API_BASE_URL}/api/sentiments/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: insight.type, id: insight.id }),
+        },
+        'Resolve Insight'
+      );
       setActionableInsights(prev =>
         prev.filter(item => !(item.id === insight.id && item.type === insight.type))
       );
@@ -271,11 +302,12 @@ export default function DashboardPage() {
     let isMounted = true;
     async function fetchTrend() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/sentiment-over-time`);
-        if (!res.ok) return;
-        const data: { date: string; good_percent: number }[] = await res.json();
-        console.debug("[Dashboard] Sentiment over time response", data);
-        if (!isMounted) return;
+        const data = await fetchJson<{ date: string; good_percent: number }[]>(
+          `${API_BASE_URL}/api/dashboard/sentiment-over-time`,
+          undefined,
+          "Sentiment Over Time"
+        );
+        if (!isMounted || !Array.isArray(data)) return;
         const bucket: { [k: string]: { date: string, value: number }[] } = {};
         const monthLabels = new Set<string>();
         data.forEach(pt => {
@@ -309,11 +341,12 @@ export default function DashboardPage() {
     let isMounted = true;
     async function fetchTrends() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/trends`);
-        if (!res.ok) return;
-        const payload = await res.json();
-        console.debug("[Dashboard] Trends response", payload);
-        if (!isMounted) return;
+        const payload = await fetchJson<Record<string, any[]>>(
+          `${API_BASE_URL}/api/dashboard/trends`,
+          undefined,
+          "Trends"
+        );
+        if (!isMounted || !payload) return;
         const parsed: TrendSeries[] = Object.entries(payload || {}).map(
           ([topic, values]: [string, any]) => ({
             topic,
@@ -341,10 +374,11 @@ export default function DashboardPage() {
     let isMounted = true;
     async function fetchSurveys() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/surveys`);
-        if (!res.ok) return;
-        const data: SurveyResponse[] = await res.json();
-        console.debug("[Dashboard] Surveys response", data);
+        const data = await fetchJson<SurveyResponse[]>(
+          `${API_BASE_URL}/api/dashboard/surveys`,
+          undefined,
+          "Surveys"
+        );
         if (!isMounted) return;
         setSurveyResponses(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -362,10 +396,11 @@ export default function DashboardPage() {
     let isMounted = true;
     async function fetchSocial() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/social`);
-        if (!res.ok) return;
-        const data: SocialPost[] = await res.json();
-        console.debug("[Dashboard] Social response", data);
+        const data = await fetchJson<SocialPost[]>(
+          `${API_BASE_URL}/api/dashboard/social`,
+          undefined,
+          "Social"
+        );
         if (!isMounted) return;
         setSocialPosts(Array.isArray(data) ? data : []);
       } catch (e) {
@@ -383,12 +418,12 @@ export default function DashboardPage() {
     let isMounted = true;
     async function fetchCustomers() {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/dashboard/customers`);
-        if (!res.ok) return;
-        const rows: { id: number; name: string; phone: string }[] = await res.json();
-        console.debug("[Dashboard] Customers response", rows);
-        if (!isMounted) return;
-        if (!Array.isArray(rows) || rows.length === 0) return;
+        const rows = await fetchJson<{ id: number; name: string; phone: string }[]>(
+          `${API_BASE_URL}/api/dashboard/customers`,
+          undefined,
+          "Customers"
+        );
+        if (!isMounted || !Array.isArray(rows) || rows.length === 0) return;
         const levels = ["Rely","Amplified","All In"];
         const countries = ["USA","India","Germany","UK","Canada","Spain","Denmark","Australia","Canada","United States"];
         const randDay = (monthIndex: number) => {
@@ -496,32 +531,33 @@ export default function DashboardPage() {
       const results: string[] = [];
       for (const c of toCall) {
         const normalized = normalizePhoneNumber(c.phone);
-        const createRes = await fetch(`${API_BASE_URL}/api/customers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: c.name, phone: normalized }),
-        });
-        if (!createRes.ok) {
-          const errText = await createRes.text();
-          results.push(`${c.name}: failed to upsert customer (${errText})`);
-          continue;
+        try {
+          const customer = await fetchJson<{ id?: number }>(
+            `${API_BASE_URL}/api/customers`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: c.name, phone: normalized }),
+            },
+            `Upsert Customer ${normalized}`
+          );
+          const id = customer?.id;
+          if (!id) {
+            results.push(`${c.name}: missing id from customer response`);
+            continue;
+          }
+          const call = await fetchJson<{ callSid?: string }>(
+            `${API_BASE_URL}/api/calls/${id}`,
+            { method: 'POST' },
+            `Call Customer ${id}`
+          );
+          results.push(`${c.name}: call initiated (SID ${call?.callSid || 'N/A'})`);
+        } catch (err: any) {
+          console.error("Call initiation failed", err);
+          results.push(`${c.name}: call failed (${err?.message || 'error'})`);
         }
-        const customer = await createRes.json();
-        const id = customer.id;
-        if (!id) {
-          results.push(`${c.name}: missing id from customer response`);
-          continue;
-        }
-        const callRes = await fetch(`${API_BASE_URL}/api/calls/${id}`, { method: 'POST' });
-        if (!callRes.ok) {
-          const errText = await callRes.text();
-          results.push(`${c.name}: call failed (${errText})`);
-          continue;
-        }
-        const call = await callRes.json();
-        results.push(`${c.name}: call initiated (SID ${call.callSid || 'N/A'})`);
       }
-      alert(results.join('\\n'));
+      alert(results.join('\n'));
     } catch (e) {
       console.error(e);
       alert('Failed to initiate calls. See console for details.');
@@ -529,7 +565,6 @@ export default function DashboardPage() {
   };
   const handleEdit = (name: string): void => alert(`Edit ${name}`);
   const handleDelete = (name: string): void => alert(`Delete ${name}`);
-  
   // Row selection
   const toggleRow = (customerId: number) => {
     setSelectedRows(prev => ({ ...prev, [customerId]: !prev[customerId] }));
